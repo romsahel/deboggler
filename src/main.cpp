@@ -2,6 +2,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/photo.hpp>
+#include <opencv2/ml.hpp>
 
 #include "commons.h"
 #include "ProcessStep.h"
@@ -45,7 +46,7 @@ struct ExtractDies : ProcessStep {
             if (boundRect[i].size().height > maxHeight)
                 maxHeight = boundRect[i].size().height;
         }
-        
+
         std::sort(std::begin(boundRect), std::end(boundRect), [](auto &a, auto &b) {
             return a.y < b.y;
         });
@@ -105,8 +106,6 @@ struct ExtractDies : ProcessStep {
     }
 
 };
-
-
 
 
 struct MergeWhiteBlobs : ProcessStep {
@@ -232,7 +231,6 @@ struct MergeWhiteBlobs : ProcessStep {
 };
 
 int main(int argc, const char *argv[]) {
-
     Assembly assembly;
     assembly.showMask = false;
     assembly.push_back(new FindWhiteBlobs());
@@ -241,16 +239,11 @@ int main(int argc, const char *argv[]) {
     assembly.init();
 
     while (true) {
-
-//        if (cvui::button(uiFrame, uiFrame.cols - 50, uiFrame.rows - 30, "&Quit")) {
-//            break;
-//        }
-
         assembly.update();
-        assembly.draw();
-
+        if (assembly.draw()) {
+            break;
+        }
         cvui::update();
-
         assembly.show();
     }
 

@@ -90,7 +90,7 @@ struct Assembly {
         }
     }
 
-    void draw() {
+    bool draw() {
 
         auto contentRect = cvui::window(uiFrame, 0, 0, inspectorWidth, inspectorHeight, "Process");
         cvui::pad(contentRect, 10);
@@ -112,6 +112,7 @@ struct Assembly {
         }
 
         cvui::endColumn();
+        return false;
     }
 
     void show() {
