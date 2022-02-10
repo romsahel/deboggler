@@ -9,7 +9,7 @@
 
 template<typename T>
 bool trackbar(const char *label, const cv::Rect &window, T &value, T min, T max) {
-    constexpr const char *format = (std::is_integral_v<T>) ? "%.0Lf" : "%.2Lf";
+    constexpr const char *format = (std::is_integral<T>::value) ? "%.0Lf" : "%.2Lf";
     auto &aBlock = cvui::internal::topBlock();
     bool hasChanged = cvui::trackbar(window.width - 25 - 5, &value, min, max, 1, format);
     cvui::text(aBlock.where, window.width - 25 + 5, aBlock.anchor.y - 45 + 10, label);

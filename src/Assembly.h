@@ -6,6 +6,7 @@
 #define DEBOGGLER_ASSEMBLY_H
 
 #include "ProcessStep.h"
+#include <filesystem>
 
 constexpr auto windowName = "Deboggler";
 constexpr auto uiWindowName = "UI";
@@ -26,12 +27,8 @@ struct Assembly {
     std::vector<ProcessStep *> steps;
     ProcessStep *maskStep = new MaskStep();
     std::string filename;
-    std::vector<const char *> sources = {
-            "/Library/dev/deboggler/images/boggle-0.jpg",
-            "/Library/dev/deboggler/images/boggle-1.jpg",
-            "/Library/dev/deboggler/images/boggle-2.jpg",
-            "/Library/dev/deboggler/images/boggle-3.jpg",
-    };
+    std::vector<std::string> sources;
+    std::vector<std::string> targets;
 
     cv::Mat src;
     cv::Mat dst;
@@ -47,8 +44,13 @@ struct Assembly {
     bool hasChanges = true;
 
     void init() {
+        cv::glob("/Library/dev/rsahel/deboggler-repo/images/*.jpg", sources, false);
+        for (int i = 0; i < sources.size(); ++i) {
+            targets.push_back(std::filesystem::path(sources[i]).stem());
+        }
         cvui::init(uiWindowName, 20);
         load(cv::imread(sources[sourceIndex]));
+        uiFrame = cv::Mat(inspectorHeight, inspectorWidth, src.type());
     }
 
     ~Assembly() {
@@ -61,8 +63,6 @@ struct Assembly {
     void load(const cv::Mat &source) {
         src = source.clone();
         dst = src.clone();
-
-        uiFrame = cv::Mat(inspectorHeight, inspectorWidth, src.type());
 
         filename = std::to_string(sourceIndex);
         for (int i = 0; i < maxStep; ++i) {

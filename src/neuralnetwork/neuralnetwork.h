@@ -6,10 +6,14 @@
 #define DEBOGGLER_NEURALNETWORK_H
 
 #include <iostream>
+#include <fstream>
+
 #include <opencv2/core/core.hpp>
 
+#include "serialization.h"
+
 template<typename UnaryFunc, typename Mat>
-Mat map(Mat &&input, UnaryFunc func) {
+Mat matmap(Mat &&input, UnaryFunc func) {
     auto outputPtr = (float *) (input.template begin<float>().ptr);
     auto outputPtrEnd = (float *) (input.template end<float>().ptr);
     for (; outputPtr != outputPtrEnd; ++outputPtr)
@@ -21,7 +25,7 @@ Mat map(Mat &&input, UnaryFunc func) {
 
 template<typename Mat>
 auto &print(Mat &&input, const char *name) {
-    return std::cout << name << " = " << std::endl << " " << input << std::endl << std::endl;
+    return std::cout << name << " = " << std::endl << " " << input << std::endl;
 }
 
 float sigmoid(float x) {
@@ -29,60 +33,87 @@ float sigmoid(float x) {
 }
 
 float dsigmoid(float sigmoid) {
-    // sigmoid(x) - (1.0f - sigmoid(x));
-    return sigmoid - (1.0f - sigmoid);
+    // sigmoid(x) * (1.0f - sigmoid(x));
+    return sigmoid * (1.0f - sigmoid);
 }
 
 struct NeuralNetwork {
-    cv::Mat m_weightsInput;
-    cv::Mat m_weightsHidden;
+    cv::Mat m_weightsInputToHidden;
+    cv::Mat m_weightsHiddenToOutput;
 
-    cv::Mat m_biasInput;
-    cv::Mat m_biasHidden;
+    cv::Mat m_biasInputToHidden;
+    cv::Mat m_biasHiddenToOutput;
 
-    float learningRate = 0.01f;
+    float learningRate = 0.05f;
 
+private:
+    NeuralNetwork() {}
+
+public:
     NeuralNetwork(int nbInputs, int nbHiddens, int nbOutputs)
-            : m_weightsInput(cv::Mat::zeros(nbHiddens, nbInputs, CV_32FC1)),
-              m_weightsHidden(cv::Mat::zeros(nbOutputs, nbHiddens, CV_32FC1)),
-              m_biasInput(cv::Mat::zeros(nbHiddens, 1, CV_32FC1)),
-              m_biasHidden(cv::Mat::zeros(nbOutputs, 1, CV_32FC1)) {
-        cv::randu(m_weightsInput, -1.0f, 1.0f);
-        cv::randu(m_weightsHidden, -1.0f, 1.0f);
-        cv::randu(m_biasInput, -1.0f, 1.0f);
-        cv::randu(m_biasHidden, -1.0f, 1.0f);
+            : m_weightsInputToHidden(cv::Mat::zeros(nbHiddens, nbInputs, CV_32FC1)),
+              m_weightsHiddenToOutput(cv::Mat::zeros(nbOutputs, nbHiddens, CV_32FC1)),
+              m_biasInputToHidden(cv::Mat::zeros(nbHiddens, 1, CV_32FC1)),
+              m_biasHiddenToOutput(cv::Mat::zeros(nbOutputs, 1, CV_32FC1)) {
+        cv::randu(m_weightsInputToHidden, -1.0f, 1.0f);
+        cv::randu(m_weightsHiddenToOutput, -1.0f, 1.0f);
+        cv::randu(m_biasInputToHidden, -1.0f, 1.0f);
+        cv::randu(m_biasHiddenToOutput, -1.0f, 1.0f);
     }
 
-    [[nodiscard]] cv::Mat feed_forward_hiddens(const cv::Mat& inputs) const {
-        return map(cv::Mat((m_weightsInput * inputs) + m_biasInput), sigmoid);
+    [[nodiscard]] cv::Mat feed_forward_to_hiddens(const cv::Mat &inputs) const {
+        return matmap(cv::Mat((m_weightsInputToHidden * inputs) + m_biasInputToHidden), sigmoid);
     }
 
-    [[nodiscard]] cv::Mat feed_forward_outputs(const cv::Mat& hiddens) const {
-        return map(cv::Mat((m_weightsHidden * hiddens) + m_biasHidden), sigmoid);
+    [[nodiscard]] cv::Mat feed_forward_to_outputs(const cv::Mat &hiddens) const {
+        return matmap(cv::Mat((m_weightsHiddenToOutput * hiddens) + m_biasHiddenToOutput), sigmoid);
     }
 
-    [[nodiscard]] cv::Mat feed_forward(const cv::Mat& inputs) const {
-        return feed_forward_outputs(feed_forward_hiddens(inputs));
+    [[nodiscard]] cv::Mat feed_forward(const cv::Mat &inputs) const {
+        return feed_forward_to_outputs(feed_forward_to_hiddens(inputs));
     }
 
-    void train(const cv::Mat& inputs, const cv::Mat& targets) {
-        auto hiddens = feed_forward_hiddens(inputs);
-        auto outputs = feed_forward_outputs(hiddens);
+    float train(const cv::Mat &inputs, const cv::Mat &targets) {
+        auto hiddens = feed_forward_to_hiddens(inputs);
+        auto outputs = feed_forward_to_outputs(hiddens);
 
         // Outputs to Hiddens backpropagation
-        cv::Mat outputErrors = targets - outputs;
+        auto errorOutputToHidden = targets - outputs;
         // calculate deltas outputs->hiddens: lr * Errors * (Outputs*(1-Outputs)) * transpose(Hiddens)
-        auto deltaHiddens = learningRate * outputErrors * map(outputs.clone(), dsigmoid) * hiddens.t();
+        auto gradientOutputToHidden = learningRate * errorOutputToHidden.mul(matmap(outputs.clone(), dsigmoid));
+        auto deltaOutputToHidden = gradientOutputToHidden * hiddens.t();
+        m_weightsHiddenToOutput += deltaOutputToHidden;
+        m_biasHiddenToOutput += gradientOutputToHidden;
 
-        m_weightsHidden += deltaHiddens;
-        
         // Hiddens to Inputs backpropagation
-        cv::Mat hiddenErrors = m_weightsHidden.t() * outputErrors;
+        cv::Mat errorHiddenToInput = m_weightsHiddenToOutput.t() * errorOutputToHidden;
         // calculate deltas hiddens->inputs: lr * Errors * (Hiddens*(1-Hiddens)) * transpose(Inputs)
-        auto deltaInputs = learningRate * hiddenErrors * map(hiddens.clone(), dsigmoid) * inputs.t();
+        auto gradientHiddenToInput = learningRate * errorHiddenToInput.mul(matmap(hiddens.clone(), dsigmoid));
+        auto deltaHiddenToInput = gradientHiddenToInput * inputs.t();
+        m_weightsInputToHidden += deltaHiddenToInput;
+        m_biasInputToHidden += gradientHiddenToInput;
 
-        m_weightsInput += deltaInputs;
-        
+        return norm(errorOutputToHidden);
+    }
+
+    void serialize(const char *path) const {
+        std::ofstream fs(path, std::ios::out | std::ios::binary);
+        matwrite(fs, m_weightsInputToHidden);
+        matwrite(fs, m_weightsHiddenToOutput);
+        matwrite(fs, m_biasInputToHidden);
+        matwrite(fs, m_biasHiddenToOutput);
+        fs.close();
+    }
+
+    static NeuralNetwork deserialize(const char *path) {
+        std::ifstream fs(path, std::ios::in | std::ios::binary);
+        NeuralNetwork neuralNetwork;
+        neuralNetwork.m_weightsInputToHidden = matread(fs);
+        neuralNetwork.m_weightsHiddenToOutput = matread(fs);
+        neuralNetwork.m_biasInputToHidden = matread(fs);
+        neuralNetwork.m_biasHiddenToOutput = matread(fs);
+        return neuralNetwork;
     }
 };
+
 #endif //DEBOGGLER_NEURALNETWORK_H

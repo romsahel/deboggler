@@ -1,96 +1,162 @@
 #include <iostream>
+
+#include <random>       // std::default_random_engine
+#include <chrono>       // std::chrono::system_clock
+
 #include <opencv2/core/core.hpp>
 #include "../commons.h"
 
 #include "perceptron.h"
 #include "neuralnetwork.h"
 
+struct Data
+{
+    cv::Mat inputs;
+    cv::Mat targets;
+    char targetChar;
+    
+    Data(const std::string& path, int nbOutputs)
+     : inputs(cv::imread(path, cv::IMREAD_GRAYSCALE))
+     , targets(cv::Mat::zeros(nbOutputs, 1, CV_32FC1))
+     , targetChar(path[path.size() - 4 - 1])
+    {
+        inputs = inputs.reshape(1, inputs.cols * inputs.rows);
+        inputs.convertTo(inputs, CV_32FC1, 1.0f / 255.0f);
 
-struct CanvasPoint {
-    cv::Point2f point;
-    int target;
-    float bias = 1.0f;
-
-    CanvasPoint(float x, float y) : point(x, y), target(y >= line(x) ? 1 : -1) {
-    }
-
-    std::vector<float> &inputs(std::vector<float> &inputs) {
-        inputs[0] = point.x;
-        inputs[1] = point.y;
-        inputs[2] = bias;
-        return inputs;
-    }
-
-    void draw(cv::Mat &canvas, int guess) const {
-        const static auto white = cv::Scalar(255, 255, 255);
-        const static auto black = cv::Scalar(0, 0, 0);
-        const static auto green = cv::Scalar(0, 255, 0);
-        const static auto red = cv::Scalar(255, 0, 0);
-        constexpr int radius = 10;
-        auto color = target == 1 ? white : target == -1 ? black : red;
-        cv::circle(canvas, remap(point), radius, color, cv::FILLED);
-        cv::circle(canvas, remap(point), radius / 3, target == guess ? green : red, cv::FILLED);
+        int targetIndex = static_cast<int>(targetChar) - 'A';
+        targets.at<float>(0, targetIndex) = 1.0f;
     }
 };
 
+size_t readAllImages(const char *path, std::vector<cv::String> &filepathes, std::vector<Data> &data, int nbOutputs) {
+    filepathes.clear();
+    data.clear();
+
+    cv::glob(path, filepathes, true);
+    size_t count = filepathes.size();
+    data.reserve(count);
+    for (size_t i = 0; i < count; i++) {
+        data.push_back(Data(filepathes[i], nbOutputs));
+    }
+    return count;
+}
+
 int main(int argc, const char *argv[]) {
+    constexpr int nbOutputs = 26;
+    constexpr const char* serializationPath = "neuralNetwork.bin";
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 
-    if (argc + 1 > 0) {
-        auto random = cv::RNG();
-        constexpr int nbPoints = 300;
+    std::vector<Data> training;
+    std::vector<cv::String> filepathes;
+    size_t count = readAllImages("/Library/dev/rsahel/deboggler-repo/cmake-build-debug/output/*.jpg", filepathes, training, nbOutputs);
+    std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
+    auto test = std::vector<Data>(training.begin(), training.begin() + count / 10);
+    for (int i = 0; i < test.size(); ++i) {
+        training.pop_back();
+    }
+    count = training.size();
 
-        constexpr int nbInputs = 2;
-        constexpr int nbOutputs = 2;
-        NeuralNetwork neuralNetwork(nbInputs, 2, nbOutputs);
-        cv::Mat testinput = (cv::Mat_<float>(nbInputs, 1) << 1.0f, 0.0f);
-        cv::Mat testoutput = (cv::Mat_<float>(nbOutputs, 1) << 1.0f, 0.0f);
-        neuralNetwork.train(testinput, testoutput);
+    int nbInputs = training[0].inputs.rows;
+    auto neuralNetwork = std::filesystem::exists(serializationPath) ? NeuralNetwork::deserialize(serializationPath) : NeuralNetwork(nbInputs, 128, nbOutputs);
 
-        Perceptron perceptron{3};
+    for (int j = 0; j < 1000; ++j) {
+        float cost = 0.0f;
 
-        std::vector<CanvasPoint> points;
-        for (int i = 0; i < nbPoints; ++i) {
-            points.push_back(CanvasPoint{random.uniform(-1.0f, 1.0f), random.uniform(-1.0f, 1.0f)});
+        std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
+        for (int i = 0; i < count; ++i) {
+            cost += neuralNetwork.train(training[i].inputs, training[i].targets);
+        }
+        std::cout << "Epoch " << j << ": " << (cost/count) << std::endl;
+    }
+    
+    neuralNetwork.serialize(serializationPath);
+
+    float accuracy = 0.0f;
+    count = test.size();
+    for (int i = 0; i < count; ++i) {
+        auto guess = neuralNetwork.feed_forward(test[i].inputs);
+        int maxIndex = 0;
+        for (int k = 1; k < nbOutputs; ++k) {
+            if (guess.at<float>(0, k) > guess.at<float>(0, maxIndex)) {
+                maxIndex = k;
+            }
         }
 
-        auto backgroundColor = cv::Scalar(127, 127, 127);
-        cv::Mat canvas = cv::Mat::zeros(height, width, CV_8UC3);
-        std::vector<float> inputs{0.0f, 0.0f, 0.0f};
-        cvui::init("Perceptron", 100);
-        int trainingIndex = 0;
-        while (true) {
-            canvas = backgroundColor;
+        char guessedChar = (char) ('A' + maxIndex);
+        if (guessedChar != test[i].targetChar) {
+            std::cout << "Wrong " << i << "! Found " << guessedChar << " instead of " << test[i].targetChar << " (" << guess.at<float>(0, maxIndex) << ")" << std::endl;
+        } else {
+            accuracy += guess.at<float>(0, maxIndex);
+        }
+    }
 
-            for (int i = 0; i < points.size(); ++i) {
-                int guess = perceptron.guess(points[i].inputs(inputs));
-                points[i].draw(canvas, guess);
+    std::cout << "Average accuracy: " << (int) ((accuracy / count) * 100.0f) << '%' << std::endl;
+}
+
+int xor_perceptron(int argc, const char *argv[]) {
+
+    auto random = cv::RNG();
+    constexpr int nbPoints = 300;
+
+    constexpr int nbInputs = 2;
+    constexpr int nbOutputs = 1;
+    NeuralNetwork neuralNetwork(nbInputs, 2, nbOutputs);
+    std::tuple<cv::Mat, cv::Mat> trainingData[] = {
+            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 0.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1) << 0.0f)),
+            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 0.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1) << 1.0f)),
+            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 1.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1) << 1.0f)),
+            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 1.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1) << 0.0f))
+    };
+
+    auto backgroundColor = cv::Scalar(127, 127, 127);
+    cv::Mat canvas = cv::Mat::zeros(height, width, CV_8UC3);
+    std::vector<float> inputs{0.0f, 0.0f, 0.0f};
+    cvui::init("Neural network", 100);
+    int trainingIndex = 0;
+    bool isTraining = false;
+    while (true) {
+        canvas = backgroundColor;
+
+        if (isTraining) {
+            for (int j = 0; j < 1000; ++j) {
+                int i = random.uniform(0, 4);
+                neuralNetwork.train(get<0>(trainingData[i]), get<1>(trainingData[i]));
             }
-
-            auto pt0 = remap(cv::Point2f(-1, line(-1)));
-            auto pt1 = remap(cv::Point2f(1, line(1)));
-            cv::line(canvas, pt0, pt1, cv::Scalar(255, 255, 255));
-
-            perceptron.draw(canvas);
-
-            if (cvui::button(canvas, 20, 20, "&Quit")) {
-                break;
-            }
-
-
-            if (cvui::button(canvas, 20, 50, "Train")) {
-                for (int i = 0; i < points.size(); ++i) {
-                    perceptron.train(points[i].inputs(inputs), points[i].target);
-                }
-            }
-
-            cvui::update();
-            cv::cvtColor(canvas, canvas, cv::COLOR_BGR2RGB);
-            cv::imshow("Perceptron", canvas);
-
-
         }
 
-        return 0;
+        constexpr int cellHeight = height / 4;
+        constexpr int cellWidth = width / 3;
+        // for each line
+        auto trueColor = cv::Scalar(0, 255, 0);
+        auto falseColor = cv::Scalar(255, 0, 0);
+        for (int i = 0; i < 4; ++i) {
+            const auto &data = get<0>(trainingData[i]);
+            const auto guess = neuralNetwork.feed_forward(data).at<float>(0, 0);
+            auto rect = cv::Rect(0, i * cellHeight, cellWidth, cellHeight);
+            cv::rectangle(canvas, rect,
+                          data.at<float>(0, 0) > 0.5f ? trueColor : falseColor, cv::FILLED);
+            rect.x += rect.width;
+            cv::rectangle(canvas, rect,
+                          data.at<float>(0, 1) > 0.5f ? trueColor : falseColor, cv::FILLED);
+            rect.x += rect.width + 25;
+            cv::rectangle(canvas, rect,
+                          guess * trueColor + (1 - guess) * falseColor, cv::FILLED);
+        }
+
+        if (cvui::button(canvas, 20, 20, "&Quit")) {
+            break;
+        }
+
+
+        if (cvui::button(canvas, 20, 50, isTraining ? "Pause training" : "Resume training")) {
+            isTraining = !isTraining;
+        }
+
+        cvui::update();
+        cv::cvtColor(canvas, canvas, cv::COLOR_BGR2RGB);
+        cv::imshow("Neural network", canvas);
+
+
     }
 
     return 0;
