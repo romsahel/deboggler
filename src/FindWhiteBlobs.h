@@ -46,7 +46,7 @@ struct FindWhiteBlobs : ProcessStep {
 //            printf("area: %f // %fx%f=%f\n", rect.size.area(), rect.size.width, rect.size.height, std::abs(1.0f - rect.size.width / rect.size.height));
                 drawContours(result, contours, (int) i, cv::Scalar(255, 255, 255), -1);
             }
-
+    
             current = result;
         }
     }

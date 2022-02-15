@@ -14,11 +14,12 @@ struct Data
     cv::Mat inputs;
     cv::Mat targets;
     char targetChar;
-    
+    std::string  path;
     Data(const std::string& path, int nbOutputs)
      : inputs(cv::imread(path, cv::IMREAD_GRAYSCALE))
      , targets(cv::Mat::zeros(nbOutputs, 1, CV_32FC1))
      , targetChar(path[path.size() - 4 - 1])
+     , path(path)
     {
         inputs = inputs.reshape(1, inputs.cols * inputs.rows);
         inputs.convertTo(inputs, CV_32FC1, 1.0f / 255.0f);
@@ -49,17 +50,17 @@ int main(int argc, const char *argv[]) {
     std::vector<Data> training;
     std::vector<cv::String> filepathes;
     size_t count = readAllImages("/Library/dev/rsahel/deboggler-repo/cmake-build-debug/output/*.jpg", filepathes, training, nbOutputs);
-    std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
-    auto test = std::vector<Data>(training.begin(), training.begin() + count / 10);
-    for (int i = 0; i < test.size(); ++i) {
-        training.pop_back();
-    }
-    count = training.size();
-
     int nbInputs = training[0].inputs.rows;
-    auto neuralNetwork = std::filesystem::exists(serializationPath) ? NeuralNetwork::deserialize(serializationPath) : NeuralNetwork(nbInputs, 128, nbOutputs);
+    auto neuralNetwork = std::filesystem::exists(serializationPath) ? NeuralNetwork().deserialize(serializationPath) : NeuralNetwork(nbInputs, 128, nbOutputs);
+    auto test = training;
+//    std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
+//    auto test = std::vector<Data>(training.begin(), training.begin() + count / 10);
+//    for (int i = 0; i < test.size(); ++i) {
+//        training.pop_back();
+//    }
+//    count = training.size();
 
-    for (int j = 0; j < 1000; ++j) {
+    for (int j = 0; j < 10000; ++j) {
         float cost = 0.0f;
 
         std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
@@ -68,7 +69,7 @@ int main(int argc, const char *argv[]) {
         }
         std::cout << "Epoch " << j << ": " << (cost/count) << std::endl;
     }
-    
+
     neuralNetwork.serialize(serializationPath);
 
     float accuracy = 0.0f;
@@ -84,7 +85,7 @@ int main(int argc, const char *argv[]) {
 
         char guessedChar = (char) ('A' + maxIndex);
         if (guessedChar != test[i].targetChar) {
-            std::cout << "Wrong " << i << "! Found " << guessedChar << " instead of " << test[i].targetChar << " (" << guess.at<float>(0, maxIndex) << ")" << std::endl;
+            std::cout << "Wrong " << i << "! Found " << guessedChar << " instead of " << test[i].targetChar << " (" << guess.at<float>(0, maxIndex) << ")" << " (" << test[i].path << ")" << std::endl; 
         } else {
             accuracy += guess.at<float>(0, maxIndex);
         }

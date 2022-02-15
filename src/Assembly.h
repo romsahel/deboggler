@@ -32,6 +32,7 @@ struct Assembly {
 
     cv::Mat src;
     cv::Mat dst;
+    cv::Mat dstFrame;
     cv::Mat uiFrame;
 
     bool firstShow = true;
@@ -79,7 +80,7 @@ struct Assembly {
 
     void update() {
         if (hasChanges) {
-            src.copyTo(dst);
+            dst = src.clone();
             for (int i = 0; i < maxStep; ++i) {
                 steps[i]->Process(src, dst);
             }
@@ -116,8 +117,10 @@ struct Assembly {
     }
 
     void show() {
+        cv::resize(dst, dstFrame, cv::Size (256, 256 / dst.size().aspectRatio()));
+
         cv::imshow(uiWindowName, uiFrame);
-        cv::imshow(windowName, dst);
+        cv::imshow(windowName, dstFrame);
 
         if (firstShow) {
             cv::moveWindow(uiWindowName, 0, 200);

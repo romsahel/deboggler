@@ -46,10 +46,7 @@ struct NeuralNetwork {
 
     float learningRate = 0.05f;
 
-private:
     NeuralNetwork() {}
-
-public:
     NeuralNetwork(int nbInputs, int nbHiddens, int nbOutputs)
             : m_weightsInputToHidden(cv::Mat::zeros(nbHiddens, nbInputs, CV_32FC1)),
               m_weightsHiddenToOutput(cv::Mat::zeros(nbOutputs, nbHiddens, CV_32FC1)),
@@ -105,14 +102,13 @@ public:
         fs.close();
     }
 
-    static NeuralNetwork deserialize(const char *path) {
+    NeuralNetwork& deserialize(const char *path) {
         std::ifstream fs(path, std::ios::in | std::ios::binary);
-        NeuralNetwork neuralNetwork;
-        neuralNetwork.m_weightsInputToHidden = matread(fs);
-        neuralNetwork.m_weightsHiddenToOutput = matread(fs);
-        neuralNetwork.m_biasInputToHidden = matread(fs);
-        neuralNetwork.m_biasHiddenToOutput = matread(fs);
-        return neuralNetwork;
+        m_weightsInputToHidden = matread(fs);
+        m_weightsHiddenToOutput = matread(fs);
+        m_biasInputToHidden = matread(fs);
+        m_biasHiddenToOutput = matread(fs);
+        return *this;
     }
 };
 

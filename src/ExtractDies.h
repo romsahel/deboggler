@@ -127,22 +127,22 @@ struct ExtractDies : ProcessStep {
             srcArr.at<uchar>(rng.uniform(0, srcArr.rows), rng.uniform(0, srcArr.cols)) = 255;
         }
     }
-
-    cv::Rect findLastContours(cv::Mat &mat) {
-        std::vector<std::vector<cv::Point> > contours;
-        findContours(mat, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
-
-        std::vector<std::vector<cv::Point> > contours_poly(contours.size());
-        std::vector<cv::Rect> boundRect(contours.size());
-        for (size_t i = 0; i < contours.size(); i++) {
-            approxPolyDP(contours[i], contours_poly[i], 3, true);
-            boundRect[i] = boundingRect(contours_poly[i]);
+    
+        cv::Rect findLastContours(cv::Mat &mat) {
+            std::vector<std::vector<cv::Point> > contours;
+            findContours(mat, contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+    
+            std::vector<std::vector<cv::Point> > contours_poly(contours.size());
+            std::vector<cv::Rect> boundRect(contours.size());
+            for (size_t i = 0; i < contours.size(); i++) {
+                approxPolyDP(contours[i], contours_poly[i], 3, true);
+                boundRect[i] = boundingRect(contours_poly[i]);
+            }
+            std::sort(std::begin(boundRect), std::end(boundRect), [](auto &a, auto &b) {
+                return a.size().area() > b.size().area();
+            });
+            return boundRect.size() > 1 ? boundRect[1] : boundRect[0];
         }
-        std::sort(std::begin(boundRect), std::end(boundRect), [](auto &a, auto &b) {
-            return a.size().area() > b.size().area();
-        });
-        return boundRect.size() > 1 ? boundRect[1] : boundRect[0];
-    }
 
     bool DrawGUI(const cv::Rect &window) override {
         bool hasChanged = false;
