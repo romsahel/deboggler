@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <integer name="boggle_0">0</integer>
+    <integer name="boggle_1">1</integer>
+    <integer name="boggle_2">2</integer>
+    <integer name="boggle_3">3</integer>
+    <integer name="boggle_4">4</integer>
+    <integer name="boggle_5">5</integer>
+    <integer name="boggle_6">6</integer>
+    <integer name="boggle_7">7</integer>
+    <integer name="boggle_8">8</integer>
+    <integer name="boggle_9">9</integer>
+    <integer name="boggle_10">10</integer>
+    <integer name="boggle_11">11</integer>
+    <integer name="boggle_12">12</integer>
+    <integer name="boggle_13">13</integer>
+    <integer name="boggle_14">14</integer>
+    <integer name="boggle_15">15</integer>
+</resources>

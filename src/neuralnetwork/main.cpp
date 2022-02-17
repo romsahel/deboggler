@@ -49,7 +49,7 @@ int main(int argc, const char *argv[]) {
 
     std::vector<Data> training;
     std::vector<cv::String> filepathes;
-    size_t count = readAllImages("/Library/dev/rsahel/deboggler-repo/cmake-build-debug/output/*.jpg", filepathes, training, nbOutputs);
+    size_t count = readAllImages("output/*.jpg", filepathes, training, nbOutputs);
     int nbInputs = training[0].inputs.rows;
     auto neuralNetwork = std::filesystem::exists(serializationPath) ? NeuralNetwork().deserialize(serializationPath) : NeuralNetwork(nbInputs, 128, nbOutputs);
     auto test = training;
@@ -60,7 +60,7 @@ int main(int argc, const char *argv[]) {
 //    }
 //    count = training.size();
 
-    for (int j = 0; j < 10000; ++j) {
+    for (int j = 0; j < 1000; ++j) {
         float cost = 0.0f;
 
         std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));

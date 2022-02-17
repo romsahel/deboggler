@@ -7,8 +7,8 @@
 #include "Assembly.h"
 #include "MergeWhiteBlobs.h"
 
-#define WRITE_IMAGE
-#include "/Library/dev/rsahel/deboggler-android/app/src/main/cpp/ProcessImage.h"
+//#define WRITE_IMAGE
+#include "../android/app/src/main/cpp/ProcessImage.h"
 
 struct DebogglerStep : ProcessStep {
     Assembly &assembly;
@@ -34,7 +34,9 @@ struct DebogglerStep : ProcessStep {
             Reset(src);
         }
         current = src;
+        cv::cvtColor(current, current, cv::COLOR_RGB2BGR);
         cv::Mat mask = cv::Mat::zeros(src.rows, src.cols, CV_8UC3);
+
         auto result = deboggler.Process(current, mask);
 //        if (result == ProcessResult::PROCESS_SUCCESS) {
 //            assembly.showMask = false;
@@ -56,7 +58,8 @@ struct DebogglerStep : ProcessStep {
         if (deboggler.result != deboggler.directoryName) {
             std::cout << "Incorrect: " << deboggler.directoryName << " (found: " << deboggler.result << ")" << std::endl;
         }
-        cv::resize(mask, mask, cv::Size (256, 256 / mask.size().aspectRatio()));
+        int windowSize = 256;
+        cv::resize(mask, mask, cv::Size (windowSize, windowSize / mask.size().aspectRatio()));
         cv::imshow("mask", mask);
         cv::moveWindow("mask", assembly.inspectorWidth + 256, 200);
         if (result >= ProcessResult::WARPED) {
@@ -74,6 +77,7 @@ struct DebogglerStep : ProcessStep {
         bool hasChanged = false;
         hasChanged |= trackbar("Step", window, deboggler.maxStep, 0, max_process_steps());
         hasChanged |= trackbar("sensitivity", window, deboggler.sensitivity, 0, 255);
+        hasChanged |= trackbar("threshold", window, deboggler.thresholdv, 0, 255);
         hasChanged |= trackbar("sensitivity2", window, deboggler.sensitivity2, 0, 255);
         hasChanged |= trackbar("denoising strength", window, deboggler.denoisingStrength, 0, 16);
         return hasChanged;
@@ -94,7 +98,6 @@ int main(int argc, const char *argv[]) {
         assembly.push_back(new DebogglerStep(assembly));
     }
 
-//    assembly.sourceIndex = 11;
     assembly.init();
 
 //    for (assembly.sourceIndex = 0; assembly.sourceIndex < assembly.sources.size(); ++assembly.sourceIndex) {

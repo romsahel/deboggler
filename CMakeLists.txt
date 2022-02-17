@@ -7,8 +7,9 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(OpenCV REQUIRED)# PATHS ${OpenCV_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-add_executable(deboggler src/main.cpp)
+add_executable(deboggler src/main.cpp android/app/src/main/cpp/ProcessImage.h)
 add_executable(neuralnetworktest src/neuralnetwork/main.cpp)
+add_executable(solutioner src/boggle_solutioner.cpp)
 
 # linking
 target_link_libraries(deboggler ${OpenCV_LIBS})

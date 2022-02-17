@@ -36,7 +36,7 @@ struct Assembly {
     cv::Mat uiFrame;
 
     bool firstShow = true;
-    int inspectorWidth = 200;
+    int inspectorWidth = 500;
     int inspectorHeight = 600;
 
     bool showMask = true;
@@ -97,10 +97,15 @@ struct Assembly {
         cvui::pad(contentRect, 10);
         cvui::beginColumn(uiFrame, contentRect.x, contentRect.y, -1, -1, 0);
 
-        if (trackbar("Images", contentRect, sourceIndex, 0, (int) (sources.size() - 1))) {
-            load(cv::imread(sources[sourceIndex]));
+        cvui::beginRow();
+        if (cvui::button("Previous Image")) {
+            load(cv::imread(sources[--sourceIndex]));
         }
-
+        if (cvui::button("Next Image")) {
+            load(cv::imread(sources[++sourceIndex]));
+        }
+        cvui::endRow();
+        
         if (trackbar("Steps", contentRect, maxStep, 0, (int) steps.size())) {
             hasChanges = true;
         }
