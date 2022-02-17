@@ -174,7 +174,7 @@ struct Deboggler {
         int copyX = 0, copyY = 0;
         result.clear();
 #ifdef WRITE_IMAGE
-        auto folder = "output/" + directoryName + '/';
+        auto folder = "../output/" + directoryName + '/';
         if (!directoryName.empty()) {
             if (!std::filesystem::is_directory(folder) || !std::filesystem::exists(folder)) { // Check if src folder exists
                 std::filesystem::create_directory(folder); // create src folder
