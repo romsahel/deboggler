@@ -1,242 +1,316 @@
 #pragma once
 
+#include <opencv2/imgcodecs.hpp>
 #include "/Library/dev/rsahel/deboggler-repo/src/neuralnetwork/neuralnetwork.h"
 
 enum class ProcessResult {
-    BLOBS_NOT_FOUND,
-    BLOBS_NOT_MERGED,
-    FRAME_NOT_FOUND,
-    PROCESS_FAILURE, // End of failures
-
-    BLOBS_FOUND,
-    BLOBS_MERGED,
-    FRAME_FOUND,
-    CORNERS_FOUND,
-    WARPED,
-    DIES_CONTOURED,
-    DIES_CLOSED,
-    PROCESS_SUCCESS // End of successes
+    DicesNotFound,
+    BlobsNotMerged,
+    FrameNotFound,
+    IndividualDicesNotFound,
+    PROCESS_FAILURE,
+    BoardIsolated,
+    DicesFound,
+    BlobsMerged,
+    FrameFound,
+    CornersFound,
+    Warped,
+    WarpedAndIsolated,
+    WarpedAndIsolatedAndCleaned,
+    IndividualDicesFound,
+    IndividualDicesFoundAndMerged,
+    PROCESS_SUCCESS,
 };
 
-int max_process_steps() {
-    return int(ProcessResult::PROCESS_SUCCESS) - int(ProcessResult::PROCESS_FAILURE) - 1;
-}
+#define CHECK_MAX_STEP(CURRENTSTEP, MAXSTEP, ...) do {\
+        if (int(CURRENTSTEP) >= int(MAXSTEP)) {        \
+            __VA_ARGS__;                              \
+            return CURRENTSTEP;                       \
+        }                                             \
+    } while (false)                                   \
 
-bool is_failure(ProcessResult result) {
-    return result <= ProcessResult::PROCESS_FAILURE;
-}
-
-bool is_success(ProcessResult result) {
-    return result > ProcessResult::PROCESS_FAILURE;
-}
-
-template<typename T>
-static bool approximately(T a, T b, T epsilon) {
-    return std::abs(b - a) < epsilon;
-}
 
 struct Deboggler {
     static constexpr int baseSensitivity = 150;
-    int sensitivity = baseSensitivity;
-    int sensitivity2 = baseSensitivity;
+    int sensitivity = 125;//baseSensitivity;
+    int sensitivity2 = 125;//baseSensitivity;
     int denoisingStrength = 1;
-    int thresholdv = 150;
+    int thresholdv = 170;
+    
+    ProcessResult maxStep = ProcessResult::PROCESS_SUCCESS;
+#ifdef WRITE_IMAGE
+    std::string imageName;
+#endif
+
     std::vector<std::vector<cv::Point>> contours;
     std::vector<std::vector<cv::Point>> hull{1};
     std::vector<cv::Point> simplifiedHull;
-    std::vector<cv::Rect> boundRect;
-    std::vector<cv::Rect> boundRect2;
-    int maxStep = max_process_steps();
-    std::string directoryName;
-
-    cv::Rect safeArea;
-    int idealArea;
-    int maxArea, minArea;
-
-    cv::Mat transformed;
+    std::vector<cv::RotatedRect> diceRotatedRects;
     cv::Point2f orderedPoints[4];
     cv::Point2f straightPoints[4];
-    std::string result;
+
+    cv::Mat transformed;
+    uint16_t *result;
 
     NeuralNetwork neuralNetwork;
-    void (*foo)(const char*);
 
-    void initializeArea(const cv::Mat &src) {
-        int w = src.cols, h = src.rows;
-        const float safeFactor = 0.05f;
-        safeArea = cv::Rect(0, 0, w, h);
-        idealArea = w * h / 4;
-        maxArea = idealArea, minArea = idealArea * 0.025f;
+    void (*foo)(const char *);
+
+    void isolateBoggleBoard(cv::Mat& src, cv::Mat &mask, int cannyThreshold1, cv::Rect *roi = nullptr) {
+        cv::cvtColor(src, mask, cv::COLOR_BGR2HSV);
+        cv::Vec3b lower(0, 255 - 125, 0);
+        cv::Vec3b upper(25 + 125, 255, 255);
+        cv::inRange(mask, lower, upper, mask);
+        cv::bitwise_not(mask, mask);
+        src.copyTo(mask, mask);
+        if (roi != nullptr)
+            mask = mask(*roi);
+        
+        static cv::Mat canny;
+        if (cannyThreshold1 < 255) {
+            cv::Canny(mask, canny, cannyThreshold1, 255);
+            auto element = getStructuringElement(0, cv::Size(3, 3));
+            dilate(canny, canny, element);
+            cv::bitwise_not(canny, canny);
+        }
+
+        cv::cvtColor(mask, mask, cv::COLOR_BGR2GRAY);
+        cv::threshold(mask, mask, 127, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
+        if (cannyThreshold1 < 255) {
+            cv::bitwise_and(mask, canny, mask);
+        }
+    }
+
+    static int findDicesContours(cv::Mat &mask, cv::Rect &roi,
+                                  std::vector<std::vector<cv::Point>> &contours,
+                                  std::vector<cv::Point> &hull) {
+        const auto roiSize = roi.size();
+        findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        mask = 0;
+        int count = 0;
+        for (int i = 0; i < contours.size(); ++i) {
+            auto rect = minAreaRect(contours[i]);
+            auto bb = rect.boundingRect();
+            cv::convexHull(contours[i], hull);
+            bool isInvalid = false;
+            isInvalid = isInvalid || bb.size().width > roiSize.width / 3;
+            isInvalid = isInvalid || bb.size().height > roiSize.height / 3;
+            isInvalid = isInvalid || bb.size().width < roiSize.width / 8;
+            isInvalid = isInvalid || bb.size().height < roiSize.height / 8;
+            isInvalid = isInvalid || std::abs(1.0f - float(bb.size().aspectRatio())) > 0.2f;
+            isInvalid = isInvalid || std::abs(1.0f - (cv::contourArea(contours[i]) / cv::contourArea(hull))) > 0.2f;
+            if (!isInvalid) {
+                drawContours(mask, contours, (int) i, count++ < 16 ? 255 : 127, -1);
+            }
+        }
+        return count;
+    }
+
+    static cv::RotatedRect mergeRotatedRect(cv::RotatedRect &r1, cv::RotatedRect &r2) {
+        static vector<Point2f> allpts;
+        allpts.clear();
+
+        static Point2f p1[4];
+        r1.points(p1);
+        allpts.push_back(p1[0]);
+        allpts.push_back(p1[1]);
+        allpts.push_back(p1[2]);
+        allpts.push_back(p1[3]);
+        r2.points(p1);
+        allpts.push_back(p1[0]);
+        allpts.push_back(p1[1]);
+        allpts.push_back(p1[2]);
+        allpts.push_back(p1[3]);
+
+        auto item = minAreaRect(allpts);
+        return item;
+    }
+
+    static void validateROIFor(cv::Rect &rect, const cv::Mat &src) {
+        if (rect.x < 0) rect.x = 0;
+        if (rect.y < 0) rect.y = 0;
+        if (rect.x + rect.width >= src.cols) rect.width = src.cols - rect.x - 1;
+        if (rect.y + rect.height >= src.rows) rect.height = src.rows - rect.y - 1;
+    }
+
+    static void drawFrameAndCorners(cv::Mat &src, cv::Mat &mask, const cv::Rect& srcRoi,
+                                    std::vector<std::vector<cv::Point>> &hulls, std::vector<cv::Point> &simplifiedHull) {
+        mask = 0;
+        drawContours(mask, hulls, 0, 255, 15);
+        for (int i = 0; i < 4; ++i) {
+            cv::circle(mask, simplifiedHull[i], 16 + 4 * i, cv::Scalar(255, 255, 255), -1);
+        }
+        cv::cvtColor(mask, mask, cv::COLOR_GRAY2BGR);
+        cv::bitwise_or(src(srcRoi), mask, mask);
+    }
+
+    static void drawCorners(cv::Mat &src, cv::Mat &mask, cv::Point2f *orderedPoints) {
+        mask = 0;
+        for (int i = 0; i < 4; ++i) {
+            cv::circle(mask, orderedPoints[i], 16 + 4 * i, cv::Scalar(255, 255, 255), -1);
+        }
+    }
+
+    static void cleanIsolatedDices(cv::Mat &mask) {
+        cv::floodFill(mask, cv::Point(mask.size().width / 2, mask.size().height / 2), 255);
+        cv::floodFill(mask, cv::Point(0, 0), 255);
+        cv::floodFill(mask, cv::Point(mask.size().width - 1, 0), 255);
+        cv::floodFill(mask, cv::Point(mask.size().width - 1, mask.size().height - 1), 255);
+        cv::floodFill(mask, cv::Point(0, mask.size().height - 1), 255);
+        cv::bitwise_not(mask, mask);
+    }
+
+    static void findOrderedIndivididualDicesContours(cv::Mat &mask,
+                                                     std::vector<std::vector<cv::Point>> &contours,
+                                                     std::vector<RotatedRect> &diceRotatedRects) {
+        diceRotatedRects.clear();
+        findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        for (int i = 0; i < contours.size(); ++i) {
+            auto rect = minAreaRect(contours[i]);
+            bool isInvalid = false;
+            isInvalid = isInvalid || rect.size.area() < 300;
+            isInvalid = isInvalid || rect.size.aspectRatio() > 6;
+            if (!isInvalid) {
+                diceRotatedRects.push_back(rect);
+            }
+        }
+
+        // Sort vertically
+        std::sort(std::begin(diceRotatedRects), std::end(diceRotatedRects), [](auto &a, auto &b) {
+            return a.center.y < b.center.y;
+        });
+
+        // Sort each line horizontally
+        auto lineHeight = mask.rows * 0.25f;
+        auto lineStart = std::begin(diceRotatedRects);
+        for (int i = 0; i < 4; ++i) {
+            auto lineEnd = lineStart + 1;
+            while (lineEnd != std::end(diceRotatedRects)
+                   && lineEnd->center.y < float(i + 1) * lineHeight) {
+                lineEnd++;
+            }
+            std::sort(lineStart, lineEnd, [](auto &a, auto &b) {
+                return a.center.x < b.center.x;
+            });
+            lineStart = lineEnd;
+        }
+    }
+
+    static void mergeRelatedContours(cv::Mat &mask, std::vector<RotatedRect> &diceRotatedRects) {
+        std::vector<int> indicesToRemove;
+        auto lineHalfHeight = mask.rows / 8.0f;
+        auto columnHalfWidth = mask.cols / 8.0f;
+        for (int i = 0; i < diceRotatedRects.size(); ++i) {
+            auto scaledRect = diceRotatedRects[i];
+            scaledRect.size *= 2.0f;
+            static cv::Point2f corners[4];
+            if (i + 1 < diceRotatedRects.size()) {
+                bool shouldMerge = false;
+//                diceRotatedRects[i + 1].points(corners);
+//                for (int k = 0; k < 4 && !shouldMerge; ++k) {
+//                    shouldMerge = scaledRect.boundingRect2f().contains(corners[k]);
+//                }
+                shouldMerge = (diceRotatedRects[i + 1].center.x - diceRotatedRects[i].center.x) < columnHalfWidth
+                              && (diceRotatedRects[i + 1].center.y - diceRotatedRects[i].center.y) < lineHalfHeight;
+                if (shouldMerge) {
+                    diceRotatedRects[i] = mergeRotatedRect(diceRotatedRects[i + 1], diceRotatedRects[i]);
+                    indicesToRemove.push_back(i + 1);
+                    i++;
+                }
+            }
+        }
+
+        if (!indicesToRemove.empty()) {
+            for (int i = int(indicesToRemove.size()) - 1; i >= 0; --i) {
+                auto it = diceRotatedRects.begin();
+                std::advance(it, indicesToRemove[i]);
+                diceRotatedRects.erase(it);
+            }
+        }
     }
 
     ProcessResult Process(cv::Mat &src, cv::Mat &mask) {
-        int currentStep = 0;
         contours.clear();
-        currentStep++;
-        auto blobsFound = findBlobs(src, mask, sensitivity, true);
 
-        // Draw blobs filled
-        mask = 0;
-        for (size_t i = 0; i < contours.size(); i++) {
-            drawContours(mask, contours, (int) i, i < 16 ? 255 : 127, -1);
-        }
-        
-        if (!blobsFound) {
-            return ProcessResult::BLOBS_NOT_FOUND;
-        }
-        if (currentStep > maxStep)
-            return ProcessResult::BLOBS_FOUND;
-
-        currentStep++;
-        if (!mergeBlobs(mask)) {
-            return ProcessResult::BLOBS_NOT_MERGED;
-        }
-        if (currentStep > maxStep)
-            return ProcessResult::BLOBS_MERGED;
-
-        currentStep++;
-        if (!findFrame(0)) {
-            return ProcessResult::FRAME_NOT_FOUND;
-        }
-        hull[0] = simplifiedHull;
-        if (currentStep > maxStep) 
-        {
-            mask = 0;
-            drawContours(mask, hull, 0, 255, 15);
-            for (int i = 0; i < 4; ++i) {
-                cv::circle(mask, simplifiedHull[i], 16 + 4.0f * i, cv::Scalar(255, 255, 255), -1);
-            }
-            cv::cvtColor(mask, mask, cv::COLOR_GRAY2BGR);
-            cv::bitwise_or(src, mask, mask);
-            return ProcessResult::FRAME_FOUND;
+        int size;
+        int x = 0, y = 0;
+        if (src.size().height >= src.size().width) {
+            size = src.size().width;
+            y = (src.size().height - src.size().width) / 2;
+        } else {
+            size = src.size().height;
+            x = (src.size().width - src.size().height) / 2;
         }
 
-        currentStep++;
-        mask = 0;
-        orderAndSetCorners(src, mask, simplifiedHull);
-        if (currentStep > maxStep) {
-            mask = 0;
-            for (int i = 0; i < 4; ++i) {
-                cv::circle(mask, orderedPoints[i], 16 + 4.0f * i, cv::Scalar(255, 255, 255), -1);
-            }
-            return ProcessResult::CORNERS_FOUND;
-        }
+        auto roi = cv::Rect(x, y, size, size);
+        isolateBoggleBoard(src, mask, 180, &roi);
+        CHECK_MAX_STEP(ProcessResult::BoardIsolated, maxStep);
 
-        currentStep++;
+        int diceCount = findDicesContours(mask, roi, contours, simplifiedHull);
+        if (diceCount < 16)
+            return ProcessResult::DicesNotFound;
+        CHECK_MAX_STEP(ProcessResult::DicesFound, maxStep);
+
+
+        if (!mergeBlobs(mask, contours))
+            return ProcessResult::BlobsNotMerged;
+        CHECK_MAX_STEP(ProcessResult::BlobsMerged, maxStep);
+
+        if (!findFrameFromContours(0, contours, hull, simplifiedHull))
+            return ProcessResult::FrameNotFound;
+
+        CHECK_MAX_STEP(ProcessResult::FrameFound, maxStep, drawFrameAndCorners(src, mask, roi, hull, simplifiedHull));
+
+        auto cornerRect = orderAndSetCorners(src, simplifiedHull, orderedPoints, straightPoints);
+        CHECK_MAX_STEP(ProcessResult::CornersFound, maxStep, drawCorners(src, mask, orderedPoints));
+
         auto transform = cv::getPerspectiveTransform(orderedPoints, straightPoints);
-        cv::warpPerspective(src, transformed, transform, transformed.size());
-        mask = cv::Mat::zeros(transformed.rows, transformed.cols, mask.type());
-        if (currentStep > maxStep)
-            return ProcessResult::WARPED;
+        transformed = cv::Mat::zeros(cornerRect.size().height, cornerRect.size().width, src.type());
+        cv::warpPerspective(src(cv::Rect(x, y, size, size)), transformed, transform, transformed.size());
+        CHECK_MAX_STEP(ProcessResult::Warped, maxStep);
 
-        currentStep++;
-//        cv::cvtColor(transformed, mask, cv::COLOR_BGR2GRAY);
-//        cv::threshold(mask, mask, thresholdv, 255, cv::THRESH_BINARY);
-        findBlobs(transformed, mask, sensitivity, true);
-        unsigned long contoursCount = contours.size();
-        if (currentStep > maxStep || contoursCount < 16) {
-            return ProcessResult::DIES_CLOSED;
-        }
-        
-        if (currentStep > maxStep) 
-        {
-            mask = 0;
-            for (size_t i = 0; i < contours.size(); i++) {
-                drawContours(mask, contours, (int) i, 255, -1);
-            }
-            return ProcessResult::DIES_CLOSED;
-        }
+        isolateBoggleBoard(transformed, mask, 255);
+        CHECK_MAX_STEP(ProcessResult::WarpedAndIsolated, maxStep);
 
-        if (hull.size() < contoursCount) {
-            hull.resize(contoursCount);
-        }
-        if (boundRect.size() < contoursCount) {
-            boundRect.resize(contoursCount);
-        }
-        for (size_t i = 0; i < contoursCount; i++) {
-            approxPolyDP(contours[i], hull[i], 3, true);
-            boundRect[i] = boundingRect(hull[i]);
-        }
-        
-        auto white = cv::Scalar(255, 255, 255);
-        int maxWidth = 28, maxHeight = 28;
+        cleanIsolatedDices(mask);
+        CHECK_MAX_STEP(ProcessResult::WarpedAndIsolatedAndCleaned, maxStep);
 
-        std::sort(std::begin(boundRect), std::begin(boundRect) + contoursCount, [](auto &a, auto &b) {
-            return a.y < b.y;
-        });
-        for (int i = 0; i < 4; ++i) {
-            std::sort(std::begin(boundRect) + i * 4, std::begin(boundRect) + (i + 1) * 4, [](auto &a, auto &b) {
-                return a.x < b.x;
-            });
-        }
 
-        transformed = cv::Mat(cv::Size(maxWidth * 4, maxHeight * 4), CV_8UC1, 255);
-        int copyX = 0, copyY = 0;
-        result.clear();
+        findOrderedIndivididualDicesContours(mask, contours, diceRotatedRects);
+        if (diceRotatedRects.size() < 16)
+            return ProcessResult::IndividualDicesNotFound;
+        CHECK_MAX_STEP(ProcessResult::IndividualDicesFound, maxStep);
+
+        mergeRelatedContours(mask, diceRotatedRects);
+        CHECK_MAX_STEP(ProcessResult::IndividualDicesFoundAndMerged, maxStep);
+        if (diceRotatedRects.size() != 16)
+            return ProcessResult::IndividualDicesNotFound;
+
 #ifdef WRITE_IMAGE
-        auto folder = "../output/" + directoryName + '/';
-        if (!directoryName.empty()) {
+        drawLinedupSortedRects(mask, transformed, diceRotatedRects);
+#endif
+
+#ifdef WRITE_IMAGE
+        auto folder = std::filesystem::path("../output/");
+        if (!imageName.empty()) {
             if (!std::filesystem::is_directory(folder) || !std::filesystem::exists(folder)) { // Check if src folder exists
                 std::filesystem::create_directory(folder); // create src folder
             }
         }
 #endif
-        for (size_t i = 0; i < 16; i++) {
-            cv::Mat mat = mask(boundRect[i]);
-            cv::RotatedRect box;
-            auto valid = findDiceBoundingBox(mat, box);
-//            mat = 0;
-//            for (int j = 0; j < contours.size(); ++j) {
-//                drawContours(mat, contours, j, 255, 15);
-//            }
-//            continue;
-//            if (valid)
-                valid = extractPatchFromOpenCVImage(mat, mat, box);
-            if (!valid)
-            {
+        auto background = cv::Scalar(0);
+        int maxSize = 28;
 #ifdef WRITE_IMAGE
-                log("error: %c", directoryName[i]);
-#else
-                log("invalid");
+        transformed = cv::Mat(cv::Size(maxSize * 4, maxSize * 4), CV_8UC1, background);
+        cv::Rect dstRoi(0, 0, maxSize, maxSize);
 #endif
-//                break;
-            }
-//            cv::Mat kernelOne = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(denoisingStrength * 2 + 1, denoisingStrength * 2 + 1));
-//            cv::morphologyEx(mat, mat, cv::MORPH_CLOSE, kernelOne);
+        for (int i = 0; i < diceRotatedRects.size() && i < 16; ++i) {
+            cv::Mat mat;
+            extractAndStraighten(mask, mat, diceRotatedRects[i]);
+            resizeAndFitACenter(mat, cv::Size(maxSize, maxSize), background);
 
-            if (mat.cols > mat.rows) {
-                cv::Mat resize = cv::Mat(mat.cols, mat.cols, mat.type(), 255);
-                mat.copyTo(resize(cv::Rect(0, (mat.cols - mat.rows) / 2, mat.cols, mat.rows)));
-                mat = resize;
-            } else {
-                cv::Mat resize = cv::Mat(mat.rows, mat.rows, mat.type(), 255);
-                mat.copyTo(resize(cv::Rect((mat.rows - mat.cols) / 2, 0, mat.cols, mat.rows)));
-                mat = resize;
-            }
-            cv::resize(mat, mat, cv::Size(transformed.cols / 4, transformed.rows / 4), cv::INTER_AREA);
-
-            mat.copyTo(transformed(cv::Rect(copyX, copyY, mat.cols, mat.rows)));
-            if (i == 3 || i == 7 || i == 11) {
-                copyX = 0;
-                copyY += mat.rows;
-            } else {
-                copyX += mat.cols;
-            }
 #ifdef WRITE_IMAGE
-            if (!directoryName.empty()) {
-                int img_index = 0;
-                for (int j = 0; j < 4; ++j, img_index++) {
-                    auto filename = folder + std::to_string(i) + '_' + std::to_string(img_index) + '_' + directoryName[i] + ".jpg";
-                    imwrite(filename, mat);
-                    cv::rotate(mat, mat, cv::ROTATE_90_CLOCKWISE);
-                }
-//                addSaltAndPepper(mat);
-//                for (int j = 0; j < 4; ++j, img_index++) {
-//                    auto filename = folder + std::to_string(i) + '_' + std::to_string(img_index) + '_' + directoryName[i] + ".jpg";
-//                    imwrite(filename, mat);
-//                    cv::rotate(mat, mat, cv::ROTATE_90_CLOCKWISE);
-//                }
-            }
+            writeCharacterToFile(mat, transformed, &dstRoi, i, imageName, folder, false);
 #endif
 #ifdef FEEDFORWARD
             mat = mat.reshape(1, mat.cols * mat.rows);
@@ -249,140 +323,108 @@ struct Deboggler {
                 }
             }
             char guessedChar = (char) ('A' + maxIndex);
-//            log("guessed: %c", guessedChar);
-            result += guessedChar;
+//            log("%c (%f)\n", guessedChar, guess.at<float>(0, maxIndex));
+            result[i] = guessedChar;
 #endif
         }
-
         return ProcessResult::PROCESS_SUCCESS;
     }
-    bool extractPatchFromOpenCVImage( cv::Mat& src, cv::Mat& dest, cv::RotatedRect patchROI) {
+
+    static void writeCharacterToFile(cv::Mat &src, cv::Mat &dst, cv::Rect *dstRoi, int index,
+                                     const std::string &imageName,
+                                     const std::filesystem::path &folder,
+                                     bool useSaltAndPepper) {
+        if (dstRoi != nullptr) {
+            src.copyTo(dst(*dstRoi));
+            if (index == 3 || index == 7 || index == 11) {
+                dstRoi->x = 0;
+                dstRoi->y += src.rows;
+            } else {
+                dstRoi->x += src.cols;
+            }
+        }
+        if (!imageName.empty()) {
+            int img_index = 0;
+            for (int n = 0; n < (useSaltAndPepper ? 2 : 1); ++n) {
+                for (int j = 0; j < 4; ++j, img_index++) {
+                    auto filename = std::string();
+                    filename.push_back(imageName[index]);
+                    filename.push_back('_');
+                    filename += imageName;
+                    filename.push_back('_');
+                    filename += std::to_string(img_index);
+                    filename += ".jpg";
+                    cv::imwrite((folder / filename).string(), src);
+                    cv::rotate(src, src, cv::ROTATE_90_CLOCKWISE);
+                }
+                addSaltAndPepper(src);
+            }
+        }
+    }
+
+    static void drawLinedupSortedRects(cv::Mat &mask, cv::Mat &dst, const std::vector<RotatedRect> &rects) {
+        int totalWidth = 0;
+        int maximumHeight = 0;
+        for (int i = 0; i < rects.size(); ++i) {
+            auto &rect = rects[i];
+            totalWidth += rect.boundingRect().size().width;
+            if (maximumHeight < rect.boundingRect().size().height)
+                maximumHeight = rect.boundingRect().size().height;
+        }
+
+        int xDstOffset = 0;
+        dst = cv::Mat::zeros(maximumHeight, totalWidth, CV_8UC1);
+        for (int i = 0; i < rects.size(); ++i) {
+            Rect rect = rects[i].boundingRect();
+            validateROIFor(rect, mask);
+            auto dstRoi = cv::Rect(xDstOffset, 0, rect.size().width, rect.size().height);
+            mask(rect).copyTo(dst(dstRoi));
+            xDstOffset += rect.size().width;
+        }
+    }
+
+    static void resizeAndFitACenter(cv::Mat &src, const cv::Size &size, const cv::Scalar &background) {
+        if (src.cols > src.rows) {
+            cv::Mat resize = cv::Mat(src.cols, src.cols, src.type(), background);
+            src.copyTo(resize(cv::Rect(0, (src.cols - src.rows) / 2, src.cols, src.rows)));
+            src = resize;
+        } else {
+            cv::Mat resize = cv::Mat(src.rows, src.rows, src.type(), background);
+            src.copyTo(resize(cv::Rect((src.rows - src.cols) / 2, 0, src.cols, src.rows)));
+            src = resize;
+        }
+        cv::resize(src, src, size, cv::INTER_AREA);
+    }
+
+    static void extractAndStraighten(cv::Mat &src, cv::Mat &dest, const cv::RotatedRect &patchROI) {
 
         // obtain the bounding box of the desired patch
         cv::Rect boundingRect = patchROI.boundingRect();
+        validateROIFor(boundingRect, src);
         auto width = patchROI.size.width;
         auto height = patchROI.size.height;
         auto angle = patchROI.angle;
 
-        // check if the bounding box fits inside the image
-        if ( boundingRect.x >= 0 && boundingRect.y >= 0 &&
-             (boundingRect.x+boundingRect.width) < src.cols &&
-             (boundingRect.y+boundingRect.height) < src.rows ) {
+        // crop out the bounding rectangle from the source image
+        auto preCropImg = src(boundingRect);
 
-            // crop out the bounding rectangle from the source image
-            auto preCropImg = src(boundingRect);
+        // the rotational center relative tot he pre-cropped image
+        int cropMidX, cropMidY;
+        cropMidX = boundingRect.width / 2;
+        cropMidY = boundingRect.height / 2;
 
-            // the rotational center relative tot he pre-cropped image
-            int cropMidX, cropMidY;
-            cropMidX = boundingRect.width/2;
-            cropMidY = boundingRect.height/2;
+        // obtain the affine transform that maps the patch ROI in the image to the
+        // dest patch image. The dest image will be an upright version.
+        auto map_mat = cv::getRotationMatrix2D(cv::Point2f(cropMidX, cropMidY), angle, 1.0f);
+        map_mat.at<double>(0, 2) += static_cast<double>(width / 2 - cropMidX);
+        map_mat.at<double>(1, 2) += static_cast<double>(height / 2 - cropMidY);
 
-            // obtain the affine transform that maps the patch ROI in the image to the
-            // dest patch image. The dest image will be an upright version.
-            auto map_mat = cv::getRotationMatrix2D(cv::Point2f(cropMidX, cropMidY), angle, 1.0f);
-            map_mat.at<double>(0,2) += static_cast<double>(width/2 - cropMidX);
-            map_mat.at<double>(1,2) += static_cast<double>(height/2 - cropMidY);
-
-            // rotate the pre-cropped image. The destination image will be
-            // allocated by warpAffine()
-            cv::warpAffine(preCropImg, dest, map_mat, cv::Size2i(width,height));
-
-            return true;
-        } // if
-        else {
-            return false;
-        } // else
-    } // extractPatch
-
-    bool findBlobs(cv::Mat &src, cv::Mat &dst, int &parameter, bool useSafeArea) {
-        cv::cvtColor(src, src, cv::COLOR_BGR2HSV);
-        extractAndFilterBlobContours(src, dst, parameter, useSafeArea);
-        if (contours.size() != 16) {
-            for (parameter = baseSensitivity; parameter >= 64; parameter--) {
-                extractAndFilterBlobContours(src, dst, parameter, useSafeArea);
-                if (contours.size() == 16) {
-                    break;
-                }
-            }
-        }
-        cv::cvtColor(src, src, cv::COLOR_HSV2BGR);
-        return contours.size() == 16;
-    }
-    
-    struct Blabla {
-        int score = 0;
-        cv::RotatedRect rect;
-        std::vector<cv::Point> contour;
-    };
-
-    void extractAndFilterBlobContours(cv::Mat &src, cv::Mat &dst, int s, bool useSafeArea) {
-
-        cv::Mat mask;
-        cv::cvtColor(src, mask, cv::COLOR_HSV2BGR);
-        cv::cvtColor(mask, mask, cv::COLOR_BGR2GRAY);
-        blur(mask, mask, Size(3, 3));
-        Canny(mask, mask, 255, 0, 3);
-        cv::Mat kernelOne = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(denoisingStrength * 2 + 1, denoisingStrength * 2 + 1));
-        cv::dilate(mask, mask, kernelOne);
-        cv::bitwise_not(mask, mask);
-
-        cv::Vec3b lower(0, 0, 255 - s);
-        cv::Vec3b upper(255, s, 255);
-        cv::inRange(src, lower, upper, dst);
-        cv::threshold(dst, dst, 127, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-        cv::bitwise_and(dst, mask, dst);
-        
-        findContours(dst, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-        std::vector<Blabla> scores;
-        cv::Point2f barycenter;
-        for (int i = 0; i < contours.size(); ++i) {
-            auto rect = minAreaRect(contours[i]);
-            bool isInvalid = false;
-            isInvalid = isInvalid || rect.size.width > safeArea.width / 3;
-            isInvalid = isInvalid || rect.size.height > safeArea.height / 3;
-            isInvalid = isInvalid || rect.size.width < safeArea.width / 16;
-            isInvalid = isInvalid || rect.size.height < safeArea.height / 16;
-            if (!isInvalid) {
-                auto& score = scores.emplace_back();
-                score.rect = rect;
-                score.contour = contours[i];
-                score.score += contours[i].size() * 10;
-                score.score += std::abs(1.0f - float (rect.size.aspectRatio())) * 10000.0f;
-                barycenter += rect.center;
-            }
-        }
-        if (scores.size() >= 16) 
-        {
-            barycenter /= float(scores.size());
-            for (int i = 0; i < scores.size(); ++i) {
-                scores[i].score += cv::norm(scores[i].rect.center - barycenter);
-            }
-            std::sort(std::begin(scores), std::end(scores), [](auto &a, auto &b) {
-                return a.score < b.score;
-            });
-            contours.clear();
-            for (int i = 0; i < scores.size(); ++i) {
-                if (scores[i].score > 20000)
-                    break;
-                contours.push_back(scores[i].contour);
-            }
-        }
+        // rotate the pre-cropped image. The destination image will be
+        // allocated by warpAffine()
+        cv::warpAffine(preCropImg, dest, map_mat, cv::Size2i(width, height));
     }
 
-    bool isBlobValid(const std::vector<cv::Point> &o, bool useSafeArea) const {
-        cv::RotatedRect rect = minAreaRect(o);
-        bool remove = false;
-        remove = remove || o.size() > 2000;
-        remove = remove || rect.size.width > safeArea.width / 4;
-        remove = remove || rect.size.height > safeArea.height / 4;
-        remove = remove || rect.size.width < safeArea.width / 16;
-        remove = remove || rect.size.height < safeArea.height / 16;
-        remove = remove || (!approximately(rect.size.width / rect.size.height, 1.0f, 0.2f));
-        return remove;
-    }
-
-    // Dilate blobs until it forms one big blob
-    bool mergeBlobs(cv::Mat &mask) {
+    static bool mergeBlobs(cv::Mat &mask, std::vector<std::vector<cv::Point>> &contours) {
         int size = 0;
         do {
             size += 10;
@@ -394,19 +436,23 @@ struct Deboggler {
         return contours.size() == 1;
     }
 
-    bool findFrame(int index) {
-        convexHull(contours[index], hull[index]);
-        auto peri = cv::arcLength(hull[index], true);
+    static bool findFrameFromContours(int index, const std::vector<std::vector<cv::Point>> &contours,
+                                      std::vector<std::vector<cv::Point>> &hulls, std::vector<cv::Point> &simplifiedHull) {
+        convexHull(contours[index], hulls[index]);
+        auto peri = cv::arcLength(hulls[index], true);
 
         double epsilon = 0.11;
         do {
             epsilon += 0.01;
-            cv::approxPolyDP(hull[index], simplifiedHull, epsilon * 0.1 * peri, true);
+            cv::approxPolyDP(hulls[index], simplifiedHull, epsilon * 0.1 * peri, true);
         } while (simplifiedHull.size() > 4 && epsilon < 10.0);
+        hulls[index] = simplifiedHull;
         return simplifiedHull.size() == 4;
     }
 
-    void orderAndSetCorners(const cv::Mat &src, cv::Mat &current, const std::vector<cv::Point> &points) {
+    static cv::Rect orderAndSetCorners(const cv::Mat &src, const std::vector<cv::Point> &points,
+                                       cv::Point2f *orderedPoints,
+                                       cv::Point2f *straightPoints) {
         cv::Point topLeft;
         cv::Point topRight;
         cv::Point bottomRight;
@@ -453,93 +499,34 @@ struct Deboggler {
         straightPoints[2] = cv::Point(width, height);
         straightPoints[3] = cv::Point(0, height);
 
-        transformed = cv::Mat::zeros(height, width, src.type());
+        return cv::Rect(0, 0, width, height);
     }
 
-    bool findDiceBoundingBox(cv::Mat &mat, cv::RotatedRect& result) {
-        findContours(mat, contours, cv::RETR_LIST, cv::CHAIN_APPROX_SIMPLE);
-        std::vector<Blabla> scores;
-        cv::Point2f barycenter;
-        int h = mat.cols, w = mat.rows;
-        for (int i = 0; i < contours.size(); ++i) {
-            auto rect = minAreaRect(contours[i]);
-            auto bb = rect.boundingRect2f();
-            bool isInvalid = false;
-            isInvalid = isInvalid || bb.size().width > w * 0.95f;
-            isInvalid = isInvalid || bb.size().height > h * 0.95f;
-            isInvalid = isInvalid || bb.size().width < w  * 0.05f;
-            isInvalid = isInvalid || bb.size().height < h  * 0.05f;
-            if (!isInvalid) {
-                auto& score = scores.emplace_back();
-                score.rect = rect;
-                score.contour = contours[i];
-                score.score += -score.rect.size.area();
-                barycenter += rect.center;
-            }
-        }
-//        log("findDiceBoundingBox: %lu // %lu", contours.size(), scores.size());
-        if (scores.size() == 0){
-            return false;   
-        }
-
-
-        std::sort(std::begin(scores), std::end(scores), [](auto &a, auto &b) {
-            return a.score < b.score;
-        });
-        
-        contours.clear();
-        contours.push_back(scores[0].contour);
-        auto scaledRect = scores[0].rect.boundingRect();
-        int rwidth  = scaledRect.width;
-        int rheight = scaledRect.height;
-        scaledRect.width = std::round(scaledRect.width * 1.2f);
-        scaledRect.height = std::round(scaledRect.height * 1.2f);
-        scaledRect.x += (rwidth - scaledRect.width) / 2;
-        scaledRect.y += (rheight - scaledRect.height) / 2;
-
-        for (int i = 1; i < scores.size(); ++i) {
-            static cv::Point2f corners[4];
-            scores[i].rect.points(corners);
-            bool valid= false;
-            for (int j = 0; j < 4 && !valid; ++j) {
-                valid = scaledRect.contains(corners[j]); 
-            }
-            if (valid) { 
-                contours.push_back(scores[i].contour); 
-            }
-        }
-
-        for (int i = contours.size() - 1; i > 0; --i) {
-            contours[0].insert(contours[0].end(), contours[i].begin(), contours[i].end());
-            contours.pop_back();
-        }
-        result = minAreaRect(contours[0]);
-        return true;
-    }
-
-    void addSaltAndPepper(cv::Mat& srcArr, float pa = 0.05, float pb = 0.05)
-    {
+    static void addSaltAndPepper(cv::Mat &dst, float pa = 0.05, float pb = 0.05) {
         cv::RNG rng;
-        int amount1 = srcArr.rows * srcArr.cols * pa;
-        int amount2 = srcArr.rows * srcArr.cols * pb;
+        int amount1 = dst.rows * dst.cols * pa;
+        int amount2 = dst.rows * dst.cols * pb;
         for (int counter = 0; counter < amount1; ++counter) {
-            srcArr.at<uchar>(rng.uniform(0, srcArr.rows), rng.uniform(0, srcArr.cols)) = 0;
+            dst.at<uchar>(rng.uniform(0, dst.rows), rng.uniform(0, dst.cols)) = 0;
 
         }
         for (int counter = 0; counter < amount2; ++counter) {
-            srcArr.at<uchar>(rng.uniform(0, srcArr.rows), rng.uniform(0, srcArr.cols)) = 255;
+            dst.at<uchar>(rng.uniform(0, dst.rows), rng.uniform(0, dst.cols)) = 255;
         }
     }
 
-    int log(const char *fmt, ...)
-    {
+    int log(const char *fmt, ...) {
         int ret;
         va_list myargs;
         va_start(myargs, fmt);
         static char buffer[4096];
         ret = vsprintf(buffer, fmt, myargs);
         va_end(myargs);
-        if (foo != nullptr) foo(buffer);
+        if (foo != nullptr) {
+            foo(buffer);
+        } else {
+            std::cout << buffer << std::endl;
+        }
         return ret;
     }
 };

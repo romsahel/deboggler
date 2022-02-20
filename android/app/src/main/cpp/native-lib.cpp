@@ -33,21 +33,28 @@ Java_com_rsahel_deboggler_CameraFragment_configureNeuralNetwork(JNIEnv *env, job
     env->ReleaseStringUTFChars(jstr, path);
 }
 
-jstring JNICALL
-Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance, jlong srcAddr) {
 
+
+int JNICALL
+Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance,
+                                                  jlong srcAddr, jcharArray ptr
+) {
     Mat &current = *(Mat *) srcAddr;
+    cv::cvtColor(current, current, cv::COLOR_RGB2BGR);
+
     auto& deboggler = get_deboggler();
+    jchar *body = env->GetCharArrayElements(ptr, 0);
 
     static bool initialize = true;
     if (initialize) {
         initialize = false;
-        deboggler.initializeArea(current);
         deboggler.foo = [](const char* fmt) {
             __android_log_print(ANDROID_LOG_INFO, TAG, "%s\n", fmt);
         };
         mask = cv::Mat::zeros(current.rows, current.cols, CV_8UC3);
     }
+    deboggler.result = body;
+
     ProcessResult result = ProcessResult::PROCESS_FAILURE;
     try {
         result = deboggler.Process(current, mask);
@@ -55,6 +62,15 @@ Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance,
     catch (cv::Exception &e) {
         __android_log_print(ANDROID_LOG_INFO, TAG, "exception caught: %s\n", e.what());
     }
+//    __android_log_print(ANDROID_LOG_INFO, TAG, "result: %d\n", result);
+
+    if (result >= ProcessResult::Warped) {
+        if (deboggler.transformed.channels() == 1) {
+            cv::cvtColor(deboggler.transformed, deboggler.transformed, cv::COLOR_GRAY2RGB);
+        }
+        deboggler.transformed.copyTo(current(cv::Rect(0, 0, deboggler.transformed.cols, deboggler.transformed.rows)));
+    }
+
 //    if (result == ProcessResult::PROCESS_SUCCESS) {
 //        float factor = (current.cols / 3) / deboggler.transformed.cols;
 //        cv::resize(deboggler.transformed, deboggler.transformed, cv::Size(deboggler.transformed.cols * factor, deboggler.transformed.rows * factor));
@@ -74,6 +90,7 @@ Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance,
 //        current = mask;
 //    }
 
-    return result == ProcessResult::PROCESS_SUCCESS ? env->NewStringUTF(deboggler.result.c_str()) : nullptr;
+    cv::cvtColor(current, current, cv::COLOR_BGR2RGB);
+    return int(result);
 }
 }

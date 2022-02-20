@@ -7,79 +7,84 @@
 #include "Assembly.h"
 #include "MergeWhiteBlobs.h"
 
-//#define WRITE_IMAGE
+#define FEEDFORWARD
+#define WRITE_IMAGE
 #include "../android/app/src/main/cpp/ProcessImage.h"
 
 struct DebogglerStep : ProcessStep {
     Assembly &assembly;
     Deboggler deboggler;
     NeuralNetwork neuralNetwork;
+    int maxStep = int (ProcessResult::BoardIsolated);
 
     DebogglerStep(Assembly &assembly) : assembly(assembly) {
-        neuralNetwork.deserialize("neuralNetwork.bin");
+        neuralNetwork.deserialize("../neuralNetwork.bin");
     }
 
     const char *GUILabel() override { return "Deboggler Step"; }
 
     void Reset(const cv::Mat &src) {
         deboggler = Deboggler();
-        deboggler.directoryName = assembly.targets[assembly.sourceIndex];
-        deboggler.initializeArea(src);
+        deboggler.imageName = assembly.targets[assembly.sourceIndex];
+        static uint16_t result[16];
+        deboggler.result = result;
         deboggler.neuralNetwork = neuralNetwork;
     }
 
     void Process(const cv::Mat &src, cv::Mat &current) override {
-        if (assembly.sourceIndex != previousIndex) {
+        if (assembly.sourceIndex != previousIndex && previousIndex < 0) {
             previousIndex = assembly.sourceIndex;
             Reset(src);
         }
+        deboggler.maxStep = ProcessResult(maxStep);
+
         current = src;
-        cv::cvtColor(current, current, cv::COLOR_RGB2BGR);
         cv::Mat mask = cv::Mat::zeros(src.rows, src.cols, CV_8UC3);
 
         auto result = deboggler.Process(current, mask);
-//        if (result == ProcessResult::PROCESS_SUCCESS) {
-//            assembly.showMask = false;
-//            float factor = (src.cols / 3) / deboggler.transformed.cols;
-//            cv::resize(deboggler.transformed, deboggler.transformed, cv::Size(deboggler.transformed.cols * factor, deboggler.transformed.rows * factor));
+//        if (result >= ProcessResult::WARPED) {
+//            if (deboggler.transformed.channels() == 1) {
+//                cv::cvtColor(deboggler.transformed, deboggler.transformed, cv::COLOR_GRAY2RGB);
+//            }
 //            deboggler.transformed.copyTo(current(cv::Rect(0, 0, deboggler.transformed.cols, deboggler.transformed.rows)));
-//            std::cout << deboggler.result << std::endl;
 //        }
-//        else if (result >= ProcessResult::WARPED) {
-//            assembly.showMask = false;
-//            cv::cvtColor(mask, mask, cv::COLOR_GRAY2BGR);
-//            cv::bitwise_or(deboggler.transformed, mask, mask);
-//            mask.copyTo(current(cv::Rect(0, 0, deboggler.transformed.cols, deboggler.transformed.rows)));
-//        } else {
-////            assembly.showMask = true;
-//            current = mask;
-//        }
-
-        if (deboggler.result != deboggler.directoryName) {
-            std::cout << "Incorrect: " << deboggler.directoryName << " (found: " << deboggler.result << ")" << std::endl;
+        if (result == ProcessResult::PROCESS_SUCCESS) {
+            bool incorrect = false;
+            std::string guess;
+            for (int i = 0; i < 16 && !incorrect; ++i) {
+                incorrect |= deboggler.result[i] != deboggler.imageName[i];
+                guess.push_back((char) deboggler.result[i]);
+            }
+            if (incorrect) {
+                std::cout << "Incorrect: " << deboggler.imageName << " (found: " << guess << ")" << std::endl;
+            }
+        } else {
+            std::cout << "Failure" << std::endl;
         }
+
         int windowSize = 256;
-        cv::resize(mask, mask, cv::Size (windowSize, windowSize / mask.size().aspectRatio()));
+        if (mask.size().width > windowSize) { 
+            cv::resize(mask, mask, cv::Size(windowSize, windowSize / mask.size().aspectRatio())); 
+        }
         cv::imshow("mask", mask);
         cv::moveWindow("mask", assembly.inspectorWidth + 256, 200);
-        if (result >= ProcessResult::WARPED) {
-            if (deboggler.transformed.size().width > 128) {
+        if (result >= ProcessResult::Warped) {
+            if (deboggler.transformed.size().width > 9128) {
                 cv::resize(deboggler.transformed, mask, cv::Size(256, 256 / mask.size().aspectRatio()));
                 cv::imshow("transformed", mask);
             } else {
                 cv::imshow("transformed", deboggler.transformed);
             }
             cv::moveWindow("transformed", assembly.inspectorWidth + 256 + 256, 200);
+        } else {
+            cv::destroyWindow("transformed");
         }
     }
 
     bool DrawGUI(const cv::Rect &window) override {
         bool hasChanged = false;
-        hasChanged |= trackbar("Step", window, deboggler.maxStep, 0, max_process_steps());
-        hasChanged |= trackbar("sensitivity", window, deboggler.sensitivity, 0, 255);
-        hasChanged |= trackbar("threshold", window, deboggler.thresholdv, 0, 255);
-        hasChanged |= trackbar("sensitivity2", window, deboggler.sensitivity2, 0, 255);
-        hasChanged |= trackbar("denoising strength", window, deboggler.denoisingStrength, 0, 16);
+        hasChanged |= trackbar("Step", window, maxStep, int(ProcessResult::PROCESS_FAILURE) + 1, int(ProcessResult::PROCESS_SUCCESS));
+//        hasChanged |= trackbar("hue", window, deboggler.lh, 0, 255);
         return hasChanged;
     }
 

@@ -2,6 +2,8 @@
 <resources>
     <color name="white">#FFFFFF</color>
     <color name="on_color">#A5D6A7</color>
+    <color name="grid_idle_color">#80FFFFFF</color>
+
     <color name="ivory">#FFFFF0</color>
     <color name="light_yellow">#FFFFE0</color>
     <color name="yellow">#FFFF00</color>

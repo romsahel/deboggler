@@ -45,7 +45,7 @@ struct Assembly {
     bool hasChanges = true;
 
     void init() {
-        cv::glob("/Library/dev/rsahel/deboggler-repo/images/*.jpg", sources, false);
+        cv::glob("../untitled folder/*.jpg", sources, false);
         for (int i = 0; i < sources.size(); ++i) {
             targets.push_back(std::filesystem::path(sources[i]).stem());
         }
@@ -98,11 +98,13 @@ struct Assembly {
         cvui::beginColumn(uiFrame, contentRect.x, contentRect.y, -1, -1, 0);
 
         cvui::beginRow();
-        if (cvui::button("Previous Image")) {
-            load(cv::imread(sources[--sourceIndex]));
+        if (cvui::button("Previous Image", cvui::DEFAULT_FONT_SCALE, sourceIndex > 0 ? cvui::DEFAULT_BUTTON_COLOR : 0xFF0000)) {
+            if (sourceIndex > 0) 
+                load(cv::imread(sources[--sourceIndex]));
         }
-        if (cvui::button("Next Image")) {
-            load(cv::imread(sources[++sourceIndex]));
+        if (cvui::button("Next Image", cvui::DEFAULT_FONT_SCALE, sourceIndex + 1 < sources.size() ? cvui::DEFAULT_BUTTON_COLOR : 0xFF0000)) {
+            if (sourceIndex + 1 < sources.size())
+                load(cv::imread(sources[++sourceIndex]));
         }
         cvui::endRow();
         

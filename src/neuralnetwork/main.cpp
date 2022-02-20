@@ -18,7 +18,7 @@ struct Data
     Data(const std::string& path, int nbOutputs)
      : inputs(cv::imread(path, cv::IMREAD_GRAYSCALE))
      , targets(cv::Mat::zeros(nbOutputs, 1, CV_32FC1))
-     , targetChar(path[path.size() - 4 - 1])
+     , targetChar(std::filesystem::path(path).filename().string()[0])
      , path(path)
     {
         inputs = inputs.reshape(1, inputs.cols * inputs.rows);
@@ -44,7 +44,7 @@ size_t readAllImages(const char *path, std::vector<cv::String> &filepathes, std:
 
 int main(int argc, const char *argv[]) {
     constexpr int nbOutputs = 26;
-    constexpr const char* serializationPath = "neuralNetwork.bin";
+    constexpr const char* serializationPath = "../neuralNetwork.bin";
     unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
 
     std::vector<Data> training;
@@ -60,7 +60,7 @@ int main(int argc, const char *argv[]) {
 //    }
 //    count = training.size();
 
-    for (int j = 0; j < 5000; ++j) {
+    for (int j = 0; j < 10000; ++j) {
         float cost = 0.0f;
 
         std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
