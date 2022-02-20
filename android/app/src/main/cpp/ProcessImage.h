@@ -93,14 +93,15 @@ struct Deboggler {
             auto bb = rect.boundingRect();
             cv::convexHull(contours[i], hull);
             bool isInvalid = false;
-            isInvalid = isInvalid || bb.size().width > roiSize.width / 3;
-            isInvalid = isInvalid || bb.size().height > roiSize.height / 3;
-            isInvalid = isInvalid || bb.size().width < roiSize.width / 8;
-            isInvalid = isInvalid || bb.size().height < roiSize.height / 8;
-            isInvalid = isInvalid || std::abs(1.0f - float(bb.size().aspectRatio())) > 0.2f;
-            isInvalid = isInvalid || std::abs(1.0f - (cv::contourArea(contours[i]) / cv::contourArea(hull))) > 0.2f;
+            isInvalid = isInvalid || rect.size.width > roiSize.width / 3;
+            isInvalid = isInvalid || rect.size.height > roiSize.height / 3;
+            isInvalid = isInvalid || rect.size.width < roiSize.width / 8;
+            isInvalid = isInvalid || rect.size.height < roiSize.height / 8;
+            isInvalid = isInvalid || std::abs(1.0f - float(rect.size.aspectRatio())) > 0.2f;
+            auto solidity = (cv::contourArea(contours[i]) / cv::contourArea(hull));
+            isInvalid = isInvalid || std::abs(1.0f - solidity) > 0.4f;
             if (!isInvalid) {
-                drawContours(mask, contours, (int) i, count++ < 16 ? 255 : 127, -1);
+                drawContours(mask, contours, (int) i, count++ < 16 ? 255 : 0, -1);
             }
         }
         return count;
@@ -244,6 +245,18 @@ struct Deboggler {
 
         auto roi = cv::Rect(x, y, size, size);
         isolateBoggleBoard(src, mask, 180, &roi);
+        cv::floodFill(mask, cv::Point(0, 0), 0);
+        cv::floodFill(mask, cv::Point(mask.size().width - 1, 0), 0);
+        cv::floodFill(mask, cv::Point(mask.size().width - 1, mask.size().height - 1), 0);
+        cv::floodFill(mask, cv::Point(0, mask.size().height - 1), 0);
+//        for (int i = 0; i < mask.size().width; i += 2) {
+//            cv::floodFill(mask, cv::Point(i, 0), 0);
+//            cv::floodFill(mask, cv::Point(i, mask.size().height - 1), 0);
+//        }
+//        for (int i = 0; i < mask.size().height; i += 2) {
+//            cv::floodFill(mask, cv::Point(0, i), 0);
+//            cv::floodFill(mask, cv::Point(mask.size().width - 1, i), 0);
+//        }
         CHECK_MAX_STEP(ProcessResult::BoardIsolated, maxStep);
 
         int diceCount = findDicesContours(mask, roi, contours, simplifiedHull);
@@ -265,8 +278,8 @@ struct Deboggler {
         CHECK_MAX_STEP(ProcessResult::CornersFound, maxStep, drawCorners(src, mask, orderedPoints));
 
         auto transform = cv::getPerspectiveTransform(orderedPoints, straightPoints);
-        transformed = cv::Mat::zeros(cornerRect.size().height, cornerRect.size().width, src.type());
-        cv::warpPerspective(src(cv::Rect(x, y, size, size)), transformed, transform, transformed.size());
+        src(roi).copyTo(transformed, mask);
+        cv::warpPerspective(transformed, transformed, transform, cornerRect.size());
         CHECK_MAX_STEP(ProcessResult::Warped, maxStep);
 
         isolateBoggleBoard(transformed, mask, 255);

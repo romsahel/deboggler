@@ -15,7 +15,7 @@ struct DebogglerStep : ProcessStep {
     Assembly &assembly;
     Deboggler deboggler;
     NeuralNetwork neuralNetwork;
-    int maxStep = int (ProcessResult::BoardIsolated);
+    int maxStep = int (ProcessResult::PROCESS_SUCCESS);
 
     DebogglerStep(Assembly &assembly) : assembly(assembly) {
         neuralNetwork.deserialize("../neuralNetwork.bin");
