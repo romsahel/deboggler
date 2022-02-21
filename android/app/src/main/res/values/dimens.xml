@@ -1,3 +1,5 @@
 <resources>
     <dimen name="fab_margin">16dp</dimen>
+    <dimen name="regular_board_size">245dp</dimen>
+    <dimen name="big_board_size">396dp</dimen>
 </resources>

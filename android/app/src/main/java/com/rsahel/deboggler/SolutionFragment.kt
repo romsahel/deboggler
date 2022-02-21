@@ -3,22 +3,25 @@ package com.rsahel.deboggler
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.content.Context.MODE_PRIVATE
-import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
 import android.widget.TextView
 import androidx.activity.viewModels
+import androidx.core.animation.addListener
+import androidx.core.animation.doOnEnd
 import androidx.core.animation.doOnRepeat
+import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
-import androidx.recyclerview.selection.SelectionTracker
+import com.google.android.material.math.MathUtils
 import com.rsahel.deboggler.databinding.FragmentSolutionBinding
+import kotlin.math.exp
 
 
 class SolutionFragment : Fragment() {
@@ -35,6 +38,10 @@ class SolutionFragment : Fragment() {
     private var offColor: Int = 0
     private lateinit var onAnimator: ValueAnimator
 
+    private var expanded = false
+    private val listExpandedSize = 0
+    private var listNonExpandedSize = -1
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -44,6 +51,10 @@ class SolutionFragment : Fragment() {
         binding.fab.setOnClickListener {
             findNavController().navigate(R.id.action_SolutionFragment_to_CameraFragment)
         }
+        binding.fabExpand.setOnClickListener {
+            expandBoard(!expanded)
+        }
+
         letters = Array(16) {
             when (it) {
                 12 -> binding.boggle0
@@ -65,7 +76,7 @@ class SolutionFragment : Fragment() {
                 11 -> binding.boggle13
                 7 -> binding.boggle14
                 3 -> binding.boggle15
-                else -> null as Button
+                else -> null as TextView
             }
         }
         return binding.root
@@ -86,7 +97,6 @@ class SolutionFragment : Fragment() {
         initializeAnimator()
         selectedSolution = null
         onAnimator.pause()
-
 
         Thread {
             val result = if (arguments != null) requireArguments().getString("result")!! else savedResult
@@ -121,6 +131,36 @@ class SolutionFragment : Fragment() {
         }
         onAnimator.repeatMode = ValueAnimator.RESTART
         onAnimator.repeatCount = -1
+    }
+
+    private fun expandBoard(expand: Boolean) {
+        expanded = expand
+
+        if (listNonExpandedSize <= 0) {
+            listNonExpandedSize = binding.recyclerView.measuredHeight
+        }
+
+        val boardStartSize = binding.boggleContainer.scaleX
+        val boardEndSize = if (expanded) 1.5f else 1.0f
+
+        val listStartSize = binding.recyclerView.measuredHeight
+        val listEndSize = if (expanded) listExpandedSize else listNonExpandedSize
+
+        val valueAnimator = ValueAnimator.ofFloat(0.0f, 1.0f)
+        valueAnimator.duration = 250L
+        valueAnimator.addUpdateListener {
+            var params = binding.recyclerView.layoutParams
+            val size = MathUtils.lerp(listStartSize.toFloat(),
+                listEndSize.toFloat(),
+                valueAnimator.animatedValue as Float).toInt()
+            params.height = size
+            binding.recyclerView.layoutParams = params
+
+            val scale = MathUtils.lerp(boardStartSize, boardEndSize, valueAnimator.animatedValue as Float)
+            binding.boggleContainer.scaleX = scale
+            binding.boggleContainer.scaleY = scale
+        }
+        valueAnimator.start()
     }
 
     private var savedResult: String
