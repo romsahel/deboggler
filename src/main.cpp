@@ -9,13 +9,14 @@
 
 #define FEEDFORWARD
 #define WRITE_IMAGE
+
 #include "../android/app/src/main/cpp/ProcessImage.h"
 
 struct DebogglerStep : ProcessStep {
     Assembly &assembly;
     Deboggler deboggler;
     NeuralNetwork neuralNetwork;
-    int maxStep = int (ProcessResult::PROCESS_SUCCESS);
+    int maxStep = int(ProcessResult::PROCESS_SUCCESS);
 
     DebogglerStep(Assembly &assembly) : assembly(assembly) {
         neuralNetwork.deserialize("../neuralNetwork.bin");
@@ -26,8 +27,8 @@ struct DebogglerStep : ProcessStep {
     void Reset(const cv::Mat &src) {
         deboggler = Deboggler();
         deboggler.imageName = assembly.targets[assembly.sourceIndex];
-        static uint16_t result[16];
-        deboggler.result = result;
+        static uint16_t guessedBoard[16];
+        deboggler.guessedBoard = guessedBoard;
         deboggler.neuralNetwork = neuralNetwork;
     }
 
@@ -43,17 +44,17 @@ struct DebogglerStep : ProcessStep {
 
         auto result = deboggler.Process(current, mask);
 //        if (result >= ProcessResult::WARPED) {
-//            if (deboggler.transformed.channels() == 1) {
-//                cv::cvtColor(deboggler.transformed, deboggler.transformed, cv::COLOR_GRAY2RGB);
+//            if (deboggler.warpedMat.channels() == 1) {
+//                cv::cvtColor(deboggler.warpedMat, deboggler.warpedMat, cv::COLOR_GRAY2RGB);
 //            }
-//            deboggler.transformed.copyTo(current(cv::Rect(0, 0, deboggler.transformed.cols, deboggler.transformed.rows)));
+//            deboggler.warpedMat.copyTo(current(cv::Rect(0, 0, deboggler.warpedMat.cols, deboggler.warpedMat.rows)));
 //        }
         if (result == ProcessResult::PROCESS_SUCCESS) {
             bool incorrect = false;
             std::string guess;
             for (int i = 0; i < 16 && !incorrect; ++i) {
-                incorrect |= deboggler.result[i] != deboggler.imageName[i];
-                guess.push_back((char) deboggler.result[i]);
+                incorrect |= deboggler.guessedBoard[i] != deboggler.imageName[i];
+                guess.push_back((char) deboggler.guessedBoard[i]);
             }
             if (incorrect) {
                 std::cout << "Incorrect: " << deboggler.imageName << " (found: " << guess << ")" << std::endl;
@@ -63,30 +64,31 @@ struct DebogglerStep : ProcessStep {
         }
 
         int windowSize = 256;
-        if (mask.size().width > windowSize) { 
-            cv::resize(mask, mask, cv::Size(windowSize, windowSize / mask.size().aspectRatio())); 
+        if (mask.size().width > windowSize) {
+            cv::resize(mask, mask, cv::Size(windowSize, windowSize / mask.size().aspectRatio()));
         }
         cv::imshow("mask", mask);
         cv::moveWindow("mask", assembly.inspectorWidth + 256, 200);
         if (result >= ProcessResult::Warped) {
-            if (deboggler.transformed.size().width > 9128) {
-                cv::resize(deboggler.transformed, mask, cv::Size(256, 256 / mask.size().aspectRatio()));
-                cv::imshow("transformed", mask);
+            if (deboggler.warpedMat.size().width > 9128) {
+                cv::resize(deboggler.warpedMat, mask, cv::Size(256, 256 / mask.size().aspectRatio()));
+                cv::imshow("warpedMat", mask);
             } else {
-                cv::imshow("transformed", deboggler.transformed);
+                cv::imshow("warpedMat", deboggler.warpedMat);
             }
-            cv::moveWindow("transformed", assembly.inspectorWidth + 256 + 256, 200);
+            cv::moveWindow("warpedMat", assembly.inspectorWidth + 256 + 256, 200);
         } else {
-            cv::destroyWindow("transformed");
+            cv::destroyWindow("warpedMat");
         }
     }
 
     bool DrawGUI(const cv::Rect &window) override {
         bool hasChanged = false;
         hasChanged |= trackbar("Step", window, maxStep, int(ProcessResult::PROCESS_FAILURE) + 1, int(ProcessResult::PROCESS_SUCCESS));
-        hasChanged |= trackbar("hue", window, deboggler.low_s, 0, 255);
+        hasChanged |= trackbar("sat", window, deboggler.low_s, 0, 255);
         hasChanged |= trackbar("hue", window, deboggler.high_h, 0, 255);
-        hasChanged |= trackbar("hue", window, deboggler.canny_threshold, 0, 255);
+        hasChanged |= trackbar("canny", window, deboggler.canny_threshold, 0, 255);
+
         return hasChanged;
     }
 

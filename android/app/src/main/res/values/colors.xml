@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="white">#FFFFFF</color>
-    <color name="on_color">#80FFDB</color>
+    <color name="on_color">#80FF82</color>
     <color name="grid_idle_color">#80FFFFFF</color>
     <color name="orange">#FF8C00</color>
 
