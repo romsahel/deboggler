@@ -44,7 +44,6 @@ Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance,
 
     auto& deboggler = get_deboggler();
     jchar *body = env->GetCharArrayElements(ptr, 0);
-
     static bool initialize = true;
     if (initialize) {
         initialize = false;
@@ -69,6 +68,10 @@ Java_com_rsahel_deboggler_CameraFragment_deboggle(JNIEnv *env, jobject instance,
             cv::cvtColor(deboggler.transformed, deboggler.transformed, cv::COLOR_GRAY2RGB);
         }
         deboggler.transformed.copyTo(current(cv::Rect(0, 0, deboggler.transformed.cols, deboggler.transformed.rows)));
+    }
+
+    if (result == ProcessResult::PROCESS_SUCCESS) {
+        env->SetCharArrayRegion(ptr, 0, 16, deboggler.result);
     }
 
 //    if (result == ProcessResult::PROCESS_SUCCESS) {

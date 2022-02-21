@@ -84,7 +84,9 @@ struct DebogglerStep : ProcessStep {
     bool DrawGUI(const cv::Rect &window) override {
         bool hasChanged = false;
         hasChanged |= trackbar("Step", window, maxStep, int(ProcessResult::PROCESS_FAILURE) + 1, int(ProcessResult::PROCESS_SUCCESS));
-//        hasChanged |= trackbar("hue", window, deboggler.lh, 0, 255);
+        hasChanged |= trackbar("hue", window, deboggler.low_s, 0, 255);
+        hasChanged |= trackbar("hue", window, deboggler.high_h, 0, 255);
+        hasChanged |= trackbar("hue", window, deboggler.canny_threshold, 0, 255);
         return hasChanged;
     }
 

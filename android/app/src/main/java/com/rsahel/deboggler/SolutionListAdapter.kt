@@ -30,7 +30,7 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
     ListAdapter<SolutionItem, SolutionListAdapter.SolutionViewHolder>(SolutionItemDiffCallback) {
 
     var selected: SolutionItem? = null
-//    var selectedView: SolutionViewHolder? = null
+    var selectedView: SolutionViewHolder? = null
 
     class SolutionViewHolder(itemView: View, val onClick: (SolutionViewHolder) -> Unit) :
         RecyclerView.ViewHolder(itemView) {
@@ -65,10 +65,10 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
             val onColor = itemView.resources.getColorStateList(R.color.on_color, null)
             if (select) {
                 valueView.setTextColor(onColor)
-                scoreView.setTextColor(onColor)
+                scoreView.backgroundTintList = onColor
             } else {
                 valueView.setTextColor(offColor)
-                scoreView.setTextColor(offColor)
+                scoreView.backgroundTintList = offColor
             }
         }
     }
@@ -77,7 +77,13 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
         val view =
             LayoutInflater.from(parent.context).inflate(R.layout.solution_item, parent, false)
         return SolutionViewHolder(view) {
+            if (selectedView != null) {
+                selectedView!!.select(false)
+            }
+
             selected = it.solution
+            selectedView = it
+
             it.select(true)
             onClick(it.solution)
         }
@@ -87,10 +93,11 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
         holder.bind(getItem(position))
         val isSelected = selected != null && selected!!.value == holder.solution.value
         holder.select(isSelected)
-
-        val animation = AnimationUtils.loadAnimation(holder.itemView.context, android.R.anim.fade_in)
-        animation.duration = 200
-        holder.itemView.startAnimation(animation)
+        if (isSelected) {
+            selectedView = holder
+        } else if (selectedView == holder) {
+            selectedView = null
+        }
     }
 }
 

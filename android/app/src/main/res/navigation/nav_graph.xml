@@ -12,7 +12,9 @@
         tools:layout="@layout/fragment_solution">
         <action
             android:id="@+id/action_SolutionFragment_to_CameraFragment"
-            app:destination="@id/CameraFragment" />
+            app:destination="@id/CameraFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left" />
     </fragment>
     <fragment
         android:id="@+id/CameraFragment"

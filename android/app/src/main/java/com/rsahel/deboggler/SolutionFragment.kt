@@ -12,6 +12,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.core.animation.doOnRepeat
 import androidx.fragment.app.Fragment
@@ -25,7 +26,7 @@ class SolutionFragment : Fragment() {
     private var _binding: FragmentSolutionBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var letters: Array<Button>
+    private lateinit var letters: Array<TextView>
     private lateinit var currentSolution: List<SolutionItem>
     private lateinit var viewModel: SolutionViewModel
     private var animationIndex = -1

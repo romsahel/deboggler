@@ -36,7 +36,8 @@ enum class ProcessResult {
     WarpedAndIsolatedAndCleaned,
     IndividualDicesFound,
     IndividualDicesFoundAndMerged,
-    PROCESS_SUCCESS;
+    PROCESS_SUCCESS,
+    PROCESS_SUCCESS_INDECISIVE;
 
     companion object {
         fun fromInt(value: Int) = values().first { it.ordinal == value }
@@ -48,10 +49,9 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
     private var _binding: FragmentCameraBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var progressBar: ProgressBar
     private var cvCameraView: CameraBridgeViewBase? = null
 
-    private val processOnBackgroundThread = false
+    private val processOnBackgroundThread = true
 
     private var guessedChars = CharArray(16)
     private var previousResult = "";
@@ -76,23 +76,24 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
         if (!LibraryLoaded) {
             val neuralNetworkFile = File(requireActivity().filesDir, "neuralNetwork.bin");
 //            if (!neuralNetworkFile.exists()) {
-                requireActivity().assets.open("neuralNetwork.bin").use { input ->
-                    val outputStream = FileOutputStream(neuralNetworkFile)
-                    Log.e(TAG, "Writing to " + neuralNetworkFile.absolutePath)
-                    outputStream.use { output ->
-                        val buffer = ByteArray(4 * 1024) // buffer size
-                        while (true) {
-                            val byteCount = input.read(buffer)
-                            if (byteCount < 0) break
-                            output.write(buffer, 0, byteCount)
-                        }
-                        output.flush()
+            requireActivity().assets.open("neuralNetwork.bin").use { input ->
+                val outputStream = FileOutputStream(neuralNetworkFile)
+                Log.e(TAG, "Writing to " + neuralNetworkFile.absolutePath)
+                outputStream.use { output ->
+                    val buffer = ByteArray(4 * 1024) // buffer size
+                    while (true) {
+                        val byteCount = input.read(buffer)
+                        if (byteCount < 0) break
+                        output.write(buffer, 0, byteCount)
                     }
+                    output.flush()
                 }
+            }
 //            }
 
             if (!OpenCVLoader.initDebug()) {
-                Log.d(TAG,"Internal OpenCV library not found. Using OpenCV Manager for initialization")
+                Log.d(TAG,
+                    "Internal OpenCV library not found. Using OpenCV Manager for initialization")
                 OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION, context, cvLoaderCallback)
             } else {
                 Log.d(TAG, "OpenCV library found inside package. Using it!")
@@ -104,9 +105,8 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        progressBar = binding.progressbar
-        progressBar.setProgress(0, true)
-        progressBar.max = 5
+        binding.progressbar.setProgress(0, true)
+        binding.progressbar.max = 3
 
         val openCvCameraView = binding.mainSurface
         cvCameraView = openCvCameraView
@@ -136,12 +136,15 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
 
     override fun onCameraFrame(frame: CameraBridgeViewBase.CvCameraViewFrame): Mat {
         val src = frame.rgba()
-        if (true) {
+        if (_binding == null) {
+            return src
+        }
+        if (screenshotNext) {
             val lastFrame = File(requireActivity().filesDir, "$screenshotIndex.jpg")
             var dst = Mat()
             org.opencv.imgproc.Imgproc.cvtColor(src, dst, org.opencv.imgproc.Imgproc.COLOR_RGB2BGR)
             org.opencv.imgcodecs.Imgcodecs.imwrite(lastFrame.absolutePath, dst)
-//            screenshotIndex++
+            screenshotIndex++
             screenshotNext = false
         }
 
@@ -164,47 +167,58 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
     }
 
     private fun processImage(src: Mat) {
-        val intResult = deboggle(src.nativeObjAddr, guessedChars)
-        val result = ProcessResult.fromInt(intResult)
-        val color = when (result) {
-            ProcessResult.DicesNotFound -> R.color.white
-            ProcessResult.BlobsNotMerged -> R.color.orange
-            ProcessResult.FrameNotFound -> R.color.orange
+        val intStatus = deboggle(src.nativeObjAddr, guessedChars)
+        val status = ProcessResult.fromInt(intStatus)
+        val color = when (status) {
+            ProcessResult.DicesNotFound -> R.color.grid_idle_color
+            ProcessResult.BlobsNotMerged -> R.color.grid_idle_color
+            ProcessResult.FrameNotFound -> R.color.grid_idle_color
             ProcessResult.IndividualDicesNotFound -> R.color.red
             ProcessResult.PROCESS_FAILURE -> R.color.red
-            ProcessResult.BoardIsolated -> R.color.white
-            ProcessResult.DicesFound -> R.color.white
-            ProcessResult.BlobsMerged -> R.color.white
-            ProcessResult.FrameFound -> R.color.white
-            ProcessResult.CornersFound -> R.color.white
-            ProcessResult.Warped -> R.color.white
-            ProcessResult.WarpedAndIsolated -> R.color.white
-            ProcessResult.WarpedAndIsolatedAndCleaned -> R.color.white
-            ProcessResult.IndividualDicesFound -> R.color.white
-            ProcessResult.IndividualDicesFoundAndMerged -> R.color.white
-            ProcessResult.PROCESS_SUCCESS -> R.color.green
+            ProcessResult.BoardIsolated -> R.color.grid_idle_color
+            ProcessResult.DicesFound -> R.color.grid_idle_color
+            ProcessResult.BlobsMerged -> R.color.grid_idle_color
+            ProcessResult.FrameFound -> R.color.grid_idle_color
+            ProcessResult.CornersFound -> R.color.grid_idle_color
+            ProcessResult.Warped -> R.color.grid_idle_color
+            ProcessResult.WarpedAndIsolated -> R.color.grid_idle_color
+            ProcessResult.WarpedAndIsolatedAndCleaned -> R.color.grid_idle_color
+            ProcessResult.IndividualDicesFound -> R.color.grid_idle_color
+            ProcessResult.IndividualDicesFoundAndMerged -> R.color.grid_idle_color
+            ProcessResult.PROCESS_SUCCESS -> R.color.on_color
+            ProcessResult.PROCESS_SUCCESS_INDECISIVE -> R.color.red
         }
-        binding.grid.backgroundTintList = ColorStateList.valueOf(color)
-        if (result == ProcessResult.PROCESS_SUCCESS) {
-            Log.i(TAG, String(guessedChars))
+        Handler(requireContext().mainLooper).post {
+            _binding?.grid?.backgroundTintList =
+                ColorStateList.valueOf(resources.getColor(color, null))
         }
 
-//        if (result == previousResult && !result.isNullOrEmpty()) {
-//            Handler(requireContext().mainLooper).post {
-//                progressBar.setProgress(progressBar.progress + 1, true);
-//            }
-//        } else {
-//            previousResult = result.orEmpty()
-//            Handler(requireContext().mainLooper).post {
-//                progressBar.setProgress(0, true);
-//            }
-//        }
-//        if (progressBar.progress >= progressBar.max - 1) {
-//            isResultFound = true
-//            Handler(requireContext().mainLooper).postAtFrontOfQueue {
-//                findNavController().navigate(R.id.action_CameraFragment_to_SolutionFragment, bundleOf("result" to previousResult))
-//            }
-//        }
+        var resetProgress = false
+        if (status == ProcessResult.PROCESS_SUCCESS) {
+            val result = String(guessedChars)
+            if (result == previousResult) {
+                Handler(requireContext().mainLooper).post {
+                    _binding?.progressbar?.setProgress(binding.progressbar.progress + 1, true)
+                }
+            } else {
+                resetProgress = true
+                previousResult = result
+            }
+            if (_binding != null && binding.progressbar.progress >= binding.progressbar.max - 1) {
+                isResultFound = true
+                Handler(requireContext().mainLooper).postAtFrontOfQueue {
+                    findNavController().navigate(R.id.action_CameraFragment_to_SolutionFragment,
+                        bundleOf("result" to previousResult))
+                }
+            }
+        }
+
+        if (resetProgress) {
+            Handler(requireContext().mainLooper).post {
+                _binding?.progressbar?.setProgress(0, true);
+            }
+        }
+
     }
 
     override fun onCameraViewStarted(width: Int, height: Int) {

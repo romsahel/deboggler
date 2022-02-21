@@ -20,6 +20,7 @@ enum class ProcessResult {
     IndividualDicesFound,
     IndividualDicesFoundAndMerged,
     PROCESS_SUCCESS,
+    PROCESS_SUCCESS_INDECISIVE,
 };
 
 #define CHECK_MAX_STEP(CURRENTSTEP, MAXSTEP, ...) do {\
@@ -31,11 +32,10 @@ enum class ProcessResult {
 
 
 struct Deboggler {
-    static constexpr int baseSensitivity = 150;
-    int sensitivity = 125;//baseSensitivity;
-    int sensitivity2 = 125;//baseSensitivity;
-    int denoisingStrength = 1;
-    int thresholdv = 170;
+    int low_s = 255 - 125;
+    int high_h = 25 + 125;
+    int canny_threshold = 180;
+    
     
     ProcessResult maxStep = ProcessResult::PROCESS_SUCCESS;
 #ifdef WRITE_IMAGE
@@ -58,8 +58,8 @@ struct Deboggler {
 
     void isolateBoggleBoard(cv::Mat& src, cv::Mat &mask, int cannyThreshold1, cv::Rect *roi = nullptr) {
         cv::cvtColor(src, mask, cv::COLOR_BGR2HSV);
-        cv::Vec3b lower(0, 255 - 125, 0);
-        cv::Vec3b upper(25 + 125, 255, 255);
+        cv::Vec3b lower(0, low_s, 0);
+        cv::Vec3b upper(high_h, 255, 255);
         cv::inRange(mask, lower, upper, mask);
         cv::bitwise_not(mask, mask);
         src.copyTo(mask, mask);
@@ -90,7 +90,6 @@ struct Deboggler {
         int count = 0;
         for (int i = 0; i < contours.size(); ++i) {
             auto rect = minAreaRect(contours[i]);
-            auto bb = rect.boundingRect();
             cv::convexHull(contours[i], hull);
             bool isInvalid = false;
             isInvalid = isInvalid || rect.size.width > roiSize.width / 3;
@@ -244,7 +243,7 @@ struct Deboggler {
         }
 
         auto roi = cv::Rect(x, y, size, size);
-        isolateBoggleBoard(src, mask, 180, &roi);
+        isolateBoggleBoard(src, mask, canny_threshold, &roi);
         cv::floodFill(mask, cv::Point(0, 0), 0);
         cv::floodFill(mask, cv::Point(mask.size().width - 1, 0), 0);
         cv::floodFill(mask, cv::Point(mask.size().width - 1, mask.size().height - 1), 0);
@@ -313,6 +312,7 @@ struct Deboggler {
 #endif
         auto background = cv::Scalar(0);
         int maxSize = 28;
+        float averageScore = 0;
 #ifdef WRITE_IMAGE
         transformed = cv::Mat(cv::Size(maxSize * 4, maxSize * 4), CV_8UC1, background);
         cv::Rect dstRoi(0, 0, maxSize, maxSize);
@@ -336,11 +336,14 @@ struct Deboggler {
                 }
             }
             char guessedChar = (char) ('A' + maxIndex);
+            averageScore += guess.at<float>(0, maxIndex);
 //            log("%c (%f)\n", guessedChar, guess.at<float>(0, maxIndex));
             result[i] = guessedChar;
 #endif
         }
-        return ProcessResult::PROCESS_SUCCESS;
+
+        averageScore /= 16.0f;
+        return averageScore > 0.97f ? ProcessResult::PROCESS_SUCCESS : ProcessResult::PROCESS_SUCCESS_INDECISIVE;
     }
 
     static void writeCharacterToFile(cv::Mat &src, cv::Mat &dst, cv::Rect *dstRoi, int index,

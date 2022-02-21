@@ -30,7 +30,7 @@
         android:layout_gravity="center"
         android:layout_margin="@dimen/fab_margin"
         android:background="@drawable/ic_camera_grid"
-        android:backgroundTint="@color/on_color" />
+        android:backgroundTint="@color/grid_idle_color" />
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fab"
