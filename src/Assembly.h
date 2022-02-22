@@ -45,7 +45,7 @@ struct Assembly {
     bool hasChanges = true;
 
     void init() {
-        cv::glob("../untitled folder/*.jpg", sources, false);
+        cv::glob("../images/*.jpg", sources, false);
         for (int i = 0; i < sources.size(); ++i) {
             targets.push_back(std::filesystem::path(sources[i]).stem());
         }
