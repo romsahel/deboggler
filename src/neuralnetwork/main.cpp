@@ -9,6 +9,7 @@
 #include "perceptron.h"
 #include "neuralnetwork.h"
 
+
 struct Data
 {
     cv::Mat inputs;

@@ -22,7 +22,6 @@ Mat matmap(Mat &&input, UnaryFunc func) {
 }
 
 #define print_mat(MAT) print(MAT, #MAT)
-
 template<typename Mat>
 auto &print(Mat &&input, const char *name) {
     return std::cout << name << " = " << std::endl << " " << input << std::endl;
@@ -33,9 +32,13 @@ float sigmoid(float x) {
 }
 
 float dsigmoid(float sigmoid) {
-    // sigmoid(x) * (1.0f - sigmoid(x));
     return sigmoid * (1.0f - sigmoid);
 }
+
+struct TrainingData {
+    cv::Mat inputs;
+    cv::Mat targets;
+};
 
 struct NeuralNetwork {
     cv::Mat m_weightsInputToHidden;
@@ -47,6 +50,7 @@ struct NeuralNetwork {
     float learningRate = 0.05f;
 
     NeuralNetwork() {}
+
     NeuralNetwork(int nbInputs, int nbHiddens, int nbOutputs)
             : m_weightsInputToHidden(cv::Mat::zeros(nbHiddens, nbInputs, CV_32FC1)),
               m_weightsHiddenToOutput(cv::Mat::zeros(nbOutputs, nbHiddens, CV_32FC1)),
@@ -69,6 +73,30 @@ struct NeuralNetwork {
     [[nodiscard]] cv::Mat feed_forward(const cv::Mat &inputs) const {
         return feed_forward_to_outputs(feed_forward_to_hiddens(inputs));
     }
+
+//    void train(std::vector<TrainingData> &trainingData, int epochs, int batchSize, float learningRate) {
+//        auto n = trainingData.size();
+//        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+//        for (int i = 0; i < epochs; ++i) {
+//            std::shuffle(trainingData.begin(), trainingData.end(), std::default_random_engine(seed));
+//            auto batchBegin = trainingData.begin();
+//            while (batchBegin != trainingData.end()) {
+//                auto batchEnd = std::distance(batchBegin, trainingData.end()) < batchSize ? batchBegin + batchSize : trainingData.end();
+//                train(batchBegin, batchEnd);
+//                batchBegin = batchEnd;
+//            }
+//        }
+//    }
+//
+//    void train(std::vector<TrainingData>::const_iterator begin, std::vector<TrainingData>::const_iterator end) {
+//        while (begin != end) {
+//            begin++;
+//        }
+//    }
+//
+//    std::tuple<cv::Mat, cv::Mat> backpropagate(const TrainingData& trainingData) {
+//        return {};
+//    }
 
     float train(const cv::Mat &inputs, const cv::Mat &targets) {
         auto hiddens = feed_forward_to_hiddens(inputs);
