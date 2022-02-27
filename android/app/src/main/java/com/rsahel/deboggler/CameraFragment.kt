@@ -75,21 +75,21 @@ class CameraFragment : Fragment(), CameraBridgeViewBase.CvCameraViewListener2 {
 
         if (!LibraryLoaded) {
             val neuralNetworkFile = File(requireActivity().filesDir, "neuralNetwork.bin");
-//            if (!neuralNetworkFile.exists()) {
-            requireActivity().assets.open("neuralNetwork.bin").use { input ->
-                val outputStream = FileOutputStream(neuralNetworkFile)
-                Log.e(TAG, "Writing to " + neuralNetworkFile.absolutePath)
-                outputStream.use { output ->
-                    val buffer = ByteArray(4 * 1024) // buffer size
-                    while (true) {
-                        val byteCount = input.read(buffer)
-                        if (byteCount < 0) break
-                        output.write(buffer, 0, byteCount)
+            if (!neuralNetworkFile.exists()) {
+                requireActivity().assets.open("neuralNetwork.bin").use { input ->
+                    val outputStream = FileOutputStream(neuralNetworkFile)
+                    Log.e(TAG, "Writing to " + neuralNetworkFile.absolutePath)
+                    outputStream.use { output ->
+                        val buffer = ByteArray(4 * 1024) // buffer size
+                        while (true) {
+                            val byteCount = input.read(buffer)
+                            if (byteCount < 0) break
+                            output.write(buffer, 0, byteCount)
+                        }
+                        output.flush()
                     }
-                    output.flush()
                 }
             }
-//            }
 
             if (!OpenCVLoader.initDebug()) {
                 Log.d(TAG,
