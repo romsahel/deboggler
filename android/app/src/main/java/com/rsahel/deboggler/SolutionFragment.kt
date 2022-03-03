@@ -3,25 +3,21 @@ package com.rsahel.deboggler
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
 import android.content.Context.MODE_PRIVATE
+import android.content.Intent
 import android.content.res.ColorStateList
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
-import android.util.Log
-import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.activity.viewModels
-import androidx.core.animation.addListener
-import androidx.core.animation.doOnEnd
 import androidx.core.animation.doOnRepeat
-import androidx.core.view.updateLayoutParams
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
 import com.google.android.material.math.MathUtils
 import com.rsahel.deboggler.databinding.FragmentSolutionBinding
-import kotlin.math.exp
 
 
 class SolutionFragment : Fragment() {
@@ -89,7 +85,10 @@ class SolutionFragment : Fragment() {
         viewModel = mainActivity.viewModels<SolutionViewModel>().value
 
         val recyclerView = binding.recyclerView
-        val adapter = SolutionListAdapter { solution -> onSelectedSolutionChanged(solution) };
+        val adapter = SolutionListAdapter(
+            { solution -> onSelectedSolutionChanged(solution) },
+            { solution, clickType -> onDictionaryClicked(solution, clickType) }
+        )
         recyclerView.adapter = adapter
         viewModel.getSolutions().observe(mainActivity) { solutions ->
             adapter.submitList(solutions)
@@ -99,7 +98,8 @@ class SolutionFragment : Fragment() {
         onAnimator.pause()
 
         Thread {
-            val result = if (arguments != null) requireArguments().getString("result")!! else savedResult
+            val result =
+                if (arguments != null) requireArguments().getString("result")!! else savedResult
             if (arguments != null) savedResult = result
 
             currentSolution = mainActivity.solutioner.findSolutions(result.lowercase())
@@ -156,7 +156,8 @@ class SolutionFragment : Fragment() {
             params.height = size
             binding.recyclerView.layoutParams = params
 
-            val scale = MathUtils.lerp(boardStartSize, boardEndSize, valueAnimator.animatedValue as Float)
+            val scale =
+                MathUtils.lerp(boardStartSize, boardEndSize, valueAnimator.animatedValue as Float)
             binding.boggleContainer.scaleX = scale
             binding.boggleContainer.scaleY = scale
         }
@@ -172,6 +173,19 @@ class SolutionFragment : Fragment() {
             val settings = requireActivity().getSharedPreferences("Solution", MODE_PRIVATE)
             settings.edit().putString("SavedResult", value).commit()
         }
+
+    private fun onDictionaryClicked(solution: SolutionItem, clickType: ClickType) {
+        if (clickType == ClickType.Regular)
+        {
+            startActivity(Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://www.larousse.fr//dictionnaires//francais//${solution.value}")))
+        }
+        else
+        {
+            startActivity(Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://www.cnrtl.fr/definition/${solution.value}")))
+        }
+    }
 
     private fun onSelectedSolutionChanged(solution: SolutionItem) {
         if (solution == selectedSolution) return

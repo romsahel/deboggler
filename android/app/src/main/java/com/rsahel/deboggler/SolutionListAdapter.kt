@@ -1,11 +1,14 @@
 package com.rsahel.deboggler
 
+import android.content.Intent
+import android.net.Uri
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.Animation
 import android.view.animation.AnimationUtils
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -16,7 +19,7 @@ data class SolutionItem(
     val value: String,
     val indices: List<Int>,
 
-) {
+    ) {
     override fun hashCode(): Int {
         return value.hashCode()
     }
@@ -26,19 +29,33 @@ data class SolutionItem(
     }
 }
 
-class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
+public enum class ClickType
+{
+    Regular,
+    Long
+}
+
+class SolutionListAdapter(
+    private val onClick: (SolutionItem) -> Unit,
+    private val onDictionaryClick: (SolutionItem, ClickType) -> Unit,
+) :
     ListAdapter<SolutionItem, SolutionListAdapter.SolutionViewHolder>(SolutionItemDiffCallback) {
 
     var selected: SolutionItem? = null
     var selectedView: SolutionViewHolder? = null
 
-    class SolutionViewHolder(itemView: View, val onClick: (SolutionViewHolder) -> Unit) :
+    class SolutionViewHolder(
+        itemView: View,
+        val onClick: (SolutionViewHolder) -> Unit,
+        val onDictionaryClick: (SolutionViewHolder, ClickType) -> Unit,
+    ) :
         RecyclerView.ViewHolder(itemView) {
 
         lateinit var solution: SolutionItem
 
         val valueView: TextView = itemView.findViewById(R.id.solution_value)
         val scoreView: TextView = itemView.findViewById(R.id.solution_score)
+        val dictionaryView: ImageView = itemView.findViewById(R.id.solution_dictionary)
 
         fun bind(item: SolutionItem) = with(itemView) {
             solution = item
@@ -58,6 +75,13 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
             itemView.setOnClickListener {
                 onClick(this)
             }
+            dictionaryView.setOnClickListener {
+                onDictionaryClick(this, ClickType.Regular)
+            }
+            dictionaryView.setOnLongClickListener {
+                onDictionaryClick(this, ClickType.Long)
+                return@setOnLongClickListener true
+            }
         }
 
         fun select(select: Boolean) {
@@ -66,9 +90,11 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
             if (select) {
                 valueView.setTextColor(onColor)
                 scoreView.backgroundTintList = onColor
+                dictionaryView.visibility = View.VISIBLE
             } else {
                 valueView.setTextColor(offColor)
                 scoreView.backgroundTintList = offColor
+                dictionaryView.visibility = View.GONE
             }
         }
     }
@@ -76,7 +102,7 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SolutionViewHolder {
         val view =
             LayoutInflater.from(parent.context).inflate(R.layout.solution_item, parent, false)
-        return SolutionViewHolder(view) {
+        return SolutionViewHolder(view, {
             if (selectedView != null) {
                 selectedView!!.select(false)
             }
@@ -86,7 +112,9 @@ class SolutionListAdapter(private val onClick: (SolutionItem) -> Unit) :
 
             it.select(true)
             onClick(it.solution)
-        }
+        }, { it: SolutionViewHolder, clickType: ClickType ->
+            onDictionaryClick(it.solution, clickType)
+        })
     }
 
     override fun onBindViewHolder(holder: SolutionViewHolder, position: Int) {
