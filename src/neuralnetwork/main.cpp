@@ -10,17 +10,15 @@
 #include "neuralnetwork.h"
 
 
-struct Data
+struct Data : public TrainingData
 {
-    cv::Mat inputs;
-    cv::Mat targets;
     char targetChar;
-    std::string  path;
-    Data(const std::string& path, int nbOutputs)
-     : inputs(cv::imread(path, cv::IMREAD_GRAYSCALE))
-     , targets(cv::Mat::zeros(nbOutputs, 1, CV_32FC1))
-     , targetChar(std::filesystem::path(path).filename().string()[0])
-     , path(path)
+    std::string path;
+
+    explicit Data(const std::string &path, int nbOutputs)
+            : TrainingData(cv::imread(path, cv::IMREAD_GRAYSCALE), cv::Mat::zeros(nbOutputs, 1, CV_32FC1))
+              , targetChar(std::filesystem::path(path).filename().string()[0])
+              , path(path)
     {
         inputs = inputs.reshape(1, inputs.cols * inputs.rows);
         inputs.convertTo(inputs, CV_32FC1, 1.0f / 255.0f);
@@ -30,14 +28,18 @@ struct Data
     }
 };
 
-size_t readAllImages(const char *path, std::vector<cv::String> &filepathes, std::vector<Data> &data, int nbOutputs) {
+void evaluate(int nbOutputs, const NeuralNetwork &neuralNetwork, const std::vector<Data> &test);
+
+size_t readAllImages(const char *path, std::vector<cv::String> &filepathes, std::vector<Data> &data, int nbOutputs)
+{
     filepathes.clear();
     data.clear();
 
     cv::glob(path, filepathes, true);
     size_t count = filepathes.size();
     data.reserve(count);
-    for (size_t i = 0; i < count; i++) {
+    for (size_t i = 0; i < count; i++)
+    {
         data.push_back(Data(filepathes[i], nbOutputs));
     }
     return count;
@@ -53,49 +55,51 @@ int main(int argc, const char *argv[]) {
     size_t count = readAllImages("../output/*.jpg", filepathes, training, nbOutputs);
     int nbInputs = training[0].inputs.rows;
     auto neuralNetwork = std::filesystem::exists(serializationPath) ? NeuralNetwork().deserialize(serializationPath) : NeuralNetwork(nbInputs, 128, nbOutputs);
-    auto test = training;
-//    std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
-//    auto test = std::vector<Data>(training.begin(), training.begin() + count / 10);
-//    for (int i = 0; i < test.size(); ++i) {
-//        training.pop_back();
-//    }
-//    count = training.size();
-
-    for (int j = 0; j < 10000; ++j) {
-        float cost = 0.0f;
-
-        std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
-        for (int i = 0; i < count; ++i) {
-            cost += neuralNetwork.train(training[i].inputs, training[i].targets);
-        }
-        std::cout << "Epoch " << j << ": " << (cost/count) << std::endl;
+    std::shuffle (training.begin(), training.end(), std::default_random_engine(seed));
+    auto test = std::vector<Data>(training.begin(), training.begin() + count / 10);
+    for (int i = 0; i < test.size(); ++i) {
+        training.pop_back();
     }
 
-    neuralNetwork.serialize(serializationPath);
+    while (true)
+    {
+        evaluate(nbOutputs, neuralNetwork, test);
+        neuralNetwork.train(training, 1000, 100, 0.01f);
+        neuralNetwork.serialize(serializationPath);
+    }
+}
 
+void evaluate(int nbOutputs, const NeuralNetwork &neuralNetwork, const std::vector<Data> &test)
+{
     float accuracy = 0.0f;
-    count = test.size();
-    for (int i = 0; i < count; ++i) {
+    auto count = test.size();
+    for (int i = 0; i < count; ++i)
+    {
         auto guess = neuralNetwork.feed_forward(test[i].inputs);
         int maxIndex = 0;
-        for (int k = 1; k < nbOutputs; ++k) {
-            if (guess.at<float>(0, k) > guess.at<float>(0, maxIndex)) {
+        for (int k = 1; k < nbOutputs; ++k)
+        {
+            if (guess.at<float>(0, k) > guess.at<float>(0, maxIndex))
+            {
                 maxIndex = k;
             }
         }
 
         char guessedChar = (char) ('A' + maxIndex);
-        if (guessedChar != test[i].targetChar) {
-            std::cout << "Wrong " << i << "! Found " << guessedChar << " instead of " << test[i].targetChar << " (" << guess.at<float>(0, maxIndex) << ")" << " (" << test[i].path << ")" << std::endl; 
-        } else {
+        if (guessedChar != test[i].targetChar)
+        {
+            cout << "Wrong " << i << "! Found " << guessedChar << " instead of " << test[i].targetChar << " (" << guess.at<float>(0, maxIndex) << ")"
+                      << " (" << test[i].path << ")" << endl;
+        } else
+        {
             accuracy += guess.at<float>(0, maxIndex);
         }
     }
-
-    std::cout << "Average accuracy: " << (int) ((accuracy / count) * 100.0f) << '%' << std::endl;
+    cout << "Average accuracy: " << (int) ((accuracy / count) * 100.0f) << '%' << endl;
 }
 
-int xor_perceptron(int argc, const char *argv[]) {
+int teach_xor(int argc, const char *argv[])
+{
 
     auto random = cv::RNG();
     constexpr int nbPoints = 300;
@@ -103,27 +107,25 @@ int xor_perceptron(int argc, const char *argv[]) {
     constexpr int nbInputs = 2;
     constexpr int nbOutputs = 1;
     NeuralNetwork neuralNetwork(nbInputs, 2, nbOutputs);
-    std::tuple<cv::Mat, cv::Mat> trainingData[] = {
-            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 0.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1) << 0.0f)),
-            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 0.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1) << 1.0f)),
-            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 1.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1) << 1.0f)),
-            std::make_tuple((cv::Mat_<float>(nbInputs, 1) << 1.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1) << 0.0f))
+    std::vector<TrainingData> trainingData = {
+            TrainingData{(cv::Mat_<float>(nbInputs, 1, CV_32FC1) << 0.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1, CV_32FC1) << 0.0f)},
+            TrainingData{(cv::Mat_<float>(nbInputs, 1, CV_32FC1) << 0.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1, CV_32FC1) << 1.0f)},
+            TrainingData{(cv::Mat_<float>(nbInputs, 1, CV_32FC1) << 1.0f, 0.0f), (cv::Mat_<float>(nbOutputs, 1, CV_32FC1) << 1.0f)},
+            TrainingData{(cv::Mat_<float>(nbInputs, 1, CV_32FC1) << 1.0f, 1.0f), (cv::Mat_<float>(nbOutputs, 1, CV_32FC1) << 0.0f)}
     };
+    auto trainingDataCopy = std::vector<TrainingData>(trainingData);
 
     auto backgroundColor = cv::Scalar(127, 127, 127);
     cv::Mat canvas = cv::Mat::zeros(height, width, CV_8UC3);
-    std::vector<float> inputs{0.0f, 0.0f, 0.0f};
     cvui::init("Neural network", 100);
-    int trainingIndex = 0;
     bool isTraining = false;
-    while (true) {
+    while (true)
+    {
         canvas = backgroundColor;
 
-        if (isTraining) {
-            for (int j = 0; j < 1000; ++j) {
-                int i = random.uniform(0, 4);
-                neuralNetwork.train(get<0>(trainingData[i]), get<1>(trainingData[i]));
-            }
+        if (isTraining)
+        {
+            neuralNetwork.train(trainingDataCopy, 1000, 4);
         }
 
         constexpr int cellHeight = height / 4;
@@ -131,8 +133,9 @@ int xor_perceptron(int argc, const char *argv[]) {
         // for each line
         auto trueColor = cv::Scalar(0, 255, 0);
         auto falseColor = cv::Scalar(255, 0, 0);
-        for (int i = 0; i < 4; ++i) {
-            const auto &data = get<0>(trainingData[i]);
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto &data = trainingData[i].inputs;
             const auto guess = neuralNetwork.feed_forward(data).at<float>(0, 0);
             auto rect = cv::Rect(0, i * cellHeight, cellWidth, cellHeight);
             cv::rectangle(canvas, rect,
@@ -145,12 +148,14 @@ int xor_perceptron(int argc, const char *argv[]) {
                           guess * trueColor + (1 - guess) * falseColor, cv::FILLED);
         }
 
-        if (cvui::button(canvas, 20, 20, "&Quit")) {
+        if (cvui::button(canvas, 20, 20, "&Quit"))
+        {
             break;
         }
 
 
-        if (cvui::button(canvas, 20, 50, isTraining ? "Pause training" : "Resume training")) {
+        if (cvui::button(canvas, 20, 50, isTraining ? "Pause training" : "Resume training"))
+        {
             isTraining = !isTraining;
         }
 
